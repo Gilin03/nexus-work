@@ -1,0 +1,18 @@
+{
+  "target": "app/",
+  "scanned_at": "2026-10-17T12:00:00+09:00",
+  "focus_areas": [
+    "auth & session (auth.py)",
+    "authorization / scope (portal.py, erp.py, approvals.py, admin.py)",
+    "SQL layer (db.py + all routes)",
+    "upload & file handling (uploads.py, portal.py attachment routes)",
+    "input validation & output encoding (validators.py, templates/)",
+    "approval workflow integrity (approvals.py)",
+    "chat/AI interface (chat.py)",
+    "config & secrets (config.py, db/grants.sql)"
+  ],
+  "findings": [],
+  "summary": {"total": 0, "high": 0, "medium": 0, "low": 0, "low_confidence": 0},
+  "method": "single-pass manual static review (defending-code-reference-harness /vuln-scan brief, <15 source files -> auto single mode), no THREAT_MODEL.md used (design already documented in docs/01_기획.md)",
+  "notes": "No injection sinks (SQL/command/eval/pickle/subprocess) found anywhere in app/. All templates rely on Jinja auto-escape with zero |safe usages. All write/decision endpoints use SELECT ... FOR UPDATE plus conditioned UPDATE ... WHERE status=... for race safety. Scope checks (_can_access, role_required, admin blueprint before_request) are re-evaluated server-side on every request from DB state, never trusted from session alone."
+}
