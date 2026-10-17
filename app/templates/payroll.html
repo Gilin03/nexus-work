@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% from "_ui.html" import conf_stamp %}
+{% block title %}급여 · NEXUS WORK{% endblock %}
+{% block content %}
+<h1>급여</h1>
+<div class="sheet">
+  {{ conf_stamp() }}
+  <p class="hint">직원은 본인, 팀장은 같은 부서, 관리자는 전체 급여를 볼 수 있습니다.</p>
+  {% if rows %}
+  <div class="scroll">
+    <table>
+      <thead><tr><th>지급월</th><th>직원</th><th class="num">기본급</th><th class="num">상여</th><th></th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <td>{{ r.pay_month }}</td>
+          <td>{{ names.get(r.user_id, '-') }}</td>
+          <td class="num">{{ r.base_salary | won }}</td>
+          <td class="num">{{ r.bonus | won }}</td>
+          <td><a href="{{ url_for('erp.payroll_detail', pay_id=r.id) }}">상세</a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="hint">급여 내역이 없습니다.</p>
+  {% endif %}
+</div>
+{% endblock %}

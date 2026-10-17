@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}AI 어시스턴트 · NEXUS WORK{% endblock %}
+{% block content %}
+<h1>AI 어시스턴트</h1>
+<div class="sheet">
+  {% if placeholder %}<p class="hint">실제 AI 연결 전이라 시험 응답이 표시됩니다.</p>{% endif %}
+  {% if messages %}
+  <ol class="thread" aria-label="대화 기록">
+    {% for m in messages %}
+    <li class="msg msg-{{ m.sender }}">
+      <div class="msg-head">
+        <span class="msg-who">{% if m.sender == 'user' %}나{% else %}어시스턴트{% endif %}</span>
+        <time>{{ m.created_at.strftime('%Y-%m-%d %H:%M') }}</time>
+      </div>
+      <div class="msg-body">{{ m.content }}</div>
+    </li>
+    {% endfor %}
+  </ol>
+  {% else %}
+  <p class="hint">아직 대화가 없습니다. 아래에 메시지를 입력해 시작하세요.</p>
+  {% endif %}
+
+  {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+  <form method="post" action="{{ url_for('chat.chat_send') }}" class="composer">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>메시지
+      <textarea name="message" required maxlength="{{ max_message }}" rows="3"></textarea>
+    </label>
+    <p class="hint">{{ '{:,}'.format(max_message) }}자까지, 분당 {{ limit }}번까지 보낼 수 있습니다. 대화 기록은 본인만 볼 수 있습니다.</p>
+    <button type="submit" class="btn primary">보내기</button>
+  </form>
+</div>
+{% endblock %}

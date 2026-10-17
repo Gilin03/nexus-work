@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% from "_ui.html" import conf_stamp %}
+{% block title %}재무 보고 · NEXUS WORK{% endblock %}
+{% block content %}
+<h1>재무 보고</h1>
+<div class="sheet">
+  {{ conf_stamp() }}
+  {% if rows %}
+  <div class="scroll">
+    <table>
+      <thead><tr><th>기준월</th><th>제목</th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr><td>{{ r.report_month }}</td><td><a href="{{ url_for('erp.finance_report', report_id=r.id) }}">{{ r.title }}</a></td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="hint">보고서가 없습니다.</p>
+  {% endif %}
+</div>
+{% endblock %}

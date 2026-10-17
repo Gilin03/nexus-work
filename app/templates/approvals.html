@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% from "_ui.html" import status %}
+{% block title %}전자결재 · NEXUS WORK{% endblock %}
+{% block content %}
+<h1>전자결재</h1>
+<p><a class="btn primary" href="{{ url_for('approvals.approval_new') }}">결재 상신</a></p>
+<div class="sheet">
+  {% if rows %}
+  <div class="scroll">
+    <table>
+      <thead><tr><th>제목</th><th>상신자</th><th>진행</th><th>상태</th><th></th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <td><a href="{{ url_for('approvals.approval_view', approval_id=r.id) }}">{{ r.title }}</a></td>
+          <td>{{ r.requester }}</td>
+          <td>{% if r.status == 'pending' %}{{ r.current_step }} / {{ r.total }}단계{% endif %}</td>
+          <td>{{ status(r.status) }}</td>
+          <td>{% if r.needs_me %}<span class="flag">결재 필요</span>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="hint">결재 문서가 없습니다.</p>
+  {% endif %}
+</div>
+{% endblock %}

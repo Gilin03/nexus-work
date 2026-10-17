@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}사용자 관리 · NEXUS WORK{% endblock %}
+{% block content %}
+<h1>사용자 관리</h1>
+<div class="sheet">
+  <p class="hint">역할 변경은 즉시 적용됩니다. 본인의 역할은 바꿀 수 없습니다.</p>
+  <div class="scroll">
+  <table>
+    <thead><tr><th>아이디</th><th>이름</th><th>부서</th><th>역할</th><th>상태</th><th></th></tr></thead>
+    <tbody>
+    {% for u in rows %}
+      <tr>
+        <td>{{ u.username }}</td>
+        <td>{{ u.display_name }}</td>
+        <td>{{ u.dept }}</td>
+        <td>
+          {% if u.id == g.user.id %}
+            {{ u.role }} (본인)
+          {% else %}
+          <form method="post" action="{{ url_for('admin.change_role', user_id=u.id) }}" class="inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="current_role" value="{{ u.role }}">
+            <select name="role" aria-label="{{ u.username }} 역할">
+              {% for r in roles %}<option value="{{ r }}"{% if r == u.role %} selected{% endif %}>{{ r }}</option>{% endfor %}
+            </select>
+            <button type="submit">변경</button>
+          </form>
+          {% endif %}
+        </td>
+        <td>{% if u.is_locked %}<span class="st st-locked">잠김</span>{% else %}정상{% endif %}{% if u.failed_count %} · 실패 {{ u.failed_count }}회{% endif %}</td>
+        <td>
+          {% if u.is_locked or u.failed_count %}
+          <form method="post" action="{{ url_for('admin.unlock', user_id=u.id) }}" class="inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit">잠금 해제</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endblock %}

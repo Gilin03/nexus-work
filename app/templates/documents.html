@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% from "_ui.html" import conf_stamp %}
+{% block title %}{{ title }} · NEXUS WORK{% endblock %}
+{% block content %}
+<h1>{{ title }}</h1>
+<div class="sheet">
+  {% if confidential %}{{ conf_stamp() }}{% endif %}
+  {% if docs %}
+  <div class="scroll">
+    <table>
+      <thead><tr><th>제목</th><th class="num">등록일</th></tr></thead>
+      <tbody>
+      {% for d in docs %}
+        <tr>
+          <td><a href="{{ url_for('portal.confidential_document' if confidential else 'portal.document', doc_id=d.id) }}">{{ d.title }}</a></td>
+          <td class="num">{{ d.created_at.strftime('%Y-%m-%d') }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="hint">문서가 없습니다.</p>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}홈 · NEXUS WORK{% endblock %}
+{% block content %}
+<h1>{{ g.user.display_name }}님, 안녕하세요</h1>
+<p class="hint">{{ g.user.dept }} · 권한 {{ g.user.role }}</p>
+<div class="sheet">
+  <h2>업무</h2>
+  <ul class="menu-list">
+    <li><a href="{{ url_for('chat.chat_view') }}">AI 어시스턴트</a></li>
+    <li><a href="{{ url_for('approvals.approval_list') }}">전자결재</a></li>
+    <li><a href="{{ url_for('erp.expense_list') }}">경비</a></li>
+    {% if g.user.role in ('manager', 'admin') %}<li><a href="{{ url_for('erp.finance_list') }}">재무 보고</a></li>{% endif %}
+  </ul>
+  <h2>자료</h2>
+  <ul class="menu-list">
+    <li><a href="{{ url_for('portal.documents') }}">문서함</a></li>
+    {% if g.user.role in ('manager', 'admin') %}<li><a href="{{ url_for('portal.confidential_list') }}">기밀 문서함</a></li>{% endif %}
+    <li><a href="{{ url_for('portal.board_list', board='notice') }}">공지사항</a></li>
+    <li><a href="{{ url_for('portal.board_list', board='free') }}">자유게시판</a></li>
+    <li><a href="{{ url_for('portal.employees') }}">직원 검색</a></li>
+  </ul>
+  <h2>인사</h2>
+  <ul class="menu-list">
+    <li><a href="{{ url_for('erp.payroll_list') }}">급여</a></li>
+  </ul>
+  {% if g.user.role == 'admin' %}
+  <h2>관리</h2>
+  <ul class="menu-list">
+    <li><a href="{{ url_for('admin.users') }}">사용자 관리</a></li>
+  </ul>
+  {% endif %}
+</div>
+{% endblock %}

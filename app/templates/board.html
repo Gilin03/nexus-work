@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}{{ name }} · NEXUS WORK{% endblock %}
+{% block content %}
+<h1>{{ name }}</h1>
+{% if can_write %}<p><a class="btn primary" href="{{ url_for('portal.post_new', board=board) }}">글쓰기</a></p>{% endif %}
+<div class="sheet">
+  {% if rows %}
+  <div class="scroll">
+    <table>
+      <thead><tr><th>제목</th><th>작성자</th><th class="num">작성일</th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <td><a href="{{ url_for('portal.post_view', post_id=r.id) }}">{{ r.title }}</a></td>
+          <td>{{ r.author }}</td>
+          <td class="num">{{ r.created_at.strftime('%Y-%m-%d') }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="hint">게시글이 없습니다.</p>
+  {% endif %}
+  <p class="pager">
+    {% if page > 1 %}<a href="{{ url_for('portal.board_list', board=board, page=page - 1) }}">이전</a>{% endif %}
+    {% if has_next %}<a href="{{ url_for('portal.board_list', board=board, page=page + 1) }}">다음</a>{% endif %}
+  </p>
+</div>
+{% endblock %}

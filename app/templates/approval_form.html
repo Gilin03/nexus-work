@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}결재 상신 · NEXUS WORK{% endblock %}
+{% block content %}
+<a class="crumb" href="{{ url_for('approvals.approval_list') }}">&larr; 전자결재</a>
+<h1>결재 상신</h1>
+<div class="sheet">
+  <p class="hint">결재선은 상신자가 직접 정합니다. 팀장 또는 관리자를 최대 {{ max_steps }}명까지 순서대로 고르세요.</p>
+  {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+  <form method="post" action="{{ url_for('approvals.approval_new') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>제목
+      <input name="title" required maxlength="200">
+    </label>
+    <label>내용
+      <textarea name="body" required maxlength="2000" rows="6"></textarea>
+    </label>
+    {% include "_approver_fields.html" %}
+    <button type="submit" class="btn primary">상신</button>
+  </form>
+</div>
+{% endblock %}

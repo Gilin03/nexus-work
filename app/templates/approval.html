@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% from "_ui.html" import status %}
+{% block title %}{{ a.title }} · NEXUS WORK{% endblock %}
+{% block content %}
+<a class="crumb" href="{{ url_for('approvals.approval_list') }}">&larr; 전자결재</a>
+<div class="sheet">
+  <h1>{{ a.title }}</h1>
+  {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+
+  <ol class="seals" aria-label="결재선">
+    <li class="seal-cell">
+      <div class="seal-head">상신</div>
+      <div class="seal-body"><span class="seal-name">{{ a.requester }}</span><span class="stamp me">상신</span></div>
+    </li>
+    {% for s in steps %}
+    <li class="seal-cell{% if s.status == 'pending' %} turn{% endif %}">
+      <div class="seal-head">{{ s.step_no }}차 결재</div>
+      <div class="seal-body">
+        <span class="seal-name">{{ s.approver }}</span>
+        {% if s.status == 'approved' %}<span class="stamp ok">승인</span>
+        {% elif s.status == 'rejected' %}<span class="stamp no">반려</span>
+        {% elif s.status == 'pending' %}<span class="seal-note">결재 대기</span>
+        {% elif s.status == 'waiting' %}<span class="seal-note">순서 대기</span>
+        {% else %}<span class="seal-note">건너뜀</span>{% endif %}
+      </div>
+    </li>
+    {% endfor %}
+  </ol>
+
+  <table class="facts">
+    <tr><th>상태</th><td>{{ status(a.status) }}</td></tr>
+    <tr><th>상신일</th><td>{{ a.created_at.strftime('%Y-%m-%d %H:%M') }}</td></tr>
+    {% if a.decided_at %}<tr><th>종결일</th><td>{{ a.decided_at.strftime('%Y-%m-%d %H:%M') }}</td></tr>{% endif %}
+    {% if expense %}<tr><th>경비</th><td><a href="{{ url_for('erp.expense_view', expense_id=expense.id) }}">{{ expense.title }}</a> ({{ expense.amount | won }})</td></tr>{% endif %}
+  </table>
+  <div class="body">{{ a.body }}</div>
+
+  {% for s in steps if s.reason %}
+  <h2>{{ s.step_no }}차 {{ s.approver }} 반려 사유</h2>
+  <div class="body">{{ s.reason }}</div>
+  {% endfor %}
+
+  {% if can_decide %}
+  <h2>결재 처리</h2>
+  <form method="post" action="{{ url_for('approvals.approval_decide', approval_id=a.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>반려 사유 (반려할 때 필수)
+      <textarea name="reason" maxlength="500" rows="3"></textarea>
+    </label>
+    <div class="actions">
+      <button type="submit" name="decision" value="approve" class="btn primary">승인</button>
+      <button type="submit" name="decision" value="reject" class="btn danger">반려</button>
+    </div>
+  </form>
+  {% endif %}
+  {% if can_withdraw %}
+  <h2>철회</h2>
+  <p class="hint">첫 결재자가 처리하기 전에만 철회할 수 있습니다.</p>
+  <form method="post" action="{{ url_for('approvals.approval_withdraw', approval_id=a.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn">상신 철회</button>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

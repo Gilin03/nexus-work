@@ -1,0 +1,20 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: nexus-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set in .env}
+      NEXUS_APP_PASSWORD: ${NEXUS_APP_PASSWORD:?set in .env}
+      NEXUS_CONF_PASSWORD: ${NEXUS_CONF_PASSWORD:?set in .env}
+    ports:
+      - "127.0.0.1:${DB_PORT:-3307}:3306"   # 로컬 루프백만 노출. 호스트 3306은 다른 MySQL이 쓰는 경우가 있어 3307 기본
+    volumes:
+      - ./db/init.sh:/docker-entrypoint-initdb.d/10-init.sh:ro
+      - ./db/schema.sql:/seed/schema.sql:ro
+      - ./db/grants.sql:/seed/grants.sql:ro
+      - nexus-mysql-data:/var/lib/mysql
+    command: ["--local-infile=0", "--secure-file-priv=NULL"]
+
+volumes:
+  nexus-mysql-data:

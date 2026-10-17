@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}직원 검색 · NEXUS WORK{% endblock %}
+{% block content %}
+<h1>직원 검색</h1>
+<form method="get" action="{{ url_for('portal.employees') }}" class="toolbar">
+  <label>이름·부서·직책
+    <input name="q" value="{{ q }}" maxlength="50" autofocus>
+  </label>
+  <button type="submit" class="btn primary">검색</button>
+</form>
+{% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+<div class="sheet">
+  {% if rows %}
+  <div class="scroll">
+    <table>
+      <thead><tr><th>이름</th><th>부서</th><th>직책</th><th class="num">내선</th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr><td>{{ r.name }}</td><td>{{ r.dept }}</td><td>{{ r.title }}</td><td class="num">{{ r.ext }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% elif not error %}
+  <p class="hint">검색 결과가 없습니다.</p>
+  {% endif %}
+</div>
+{% endblock %}

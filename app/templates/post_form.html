@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}글쓰기 · {{ name }}{% endblock %}
+{% block content %}
+<a class="crumb" href="{{ url_for('portal.board_list', board=board) }}">&larr; {{ name }}</a>
+<h1>{{ name }} 글쓰기</h1>
+<div class="sheet">
+  {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+  <form method="post" action="{{ url_for('portal.post_new', board=board) }}" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>제목
+      <input name="title" required maxlength="120">
+    </label>
+    <label>내용
+      <textarea name="body" required maxlength="5000" rows="8"></textarea>
+    </label>
+    <label>첨부 (pdf, png, jpg, txt · 2MB 이하)
+      <input type="file" name="attachment" accept=".pdf,.png,.jpg,.txt">
+    </label>
+    <button type="submit" class="btn primary">등록</button>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}NEXUS WORK{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<a class="skip" href="#main">본문으로 건너뛰기</a>
+{% if g.user %}
+{% set ep = request.endpoint or '' %}
+{% set board = (request.view_args or {}).get('board') %}
+{% set privileged = g.user.role in ('manager', 'admin') %}
+<div class="shell">
+  <aside class="side">
+    <a class="brand" href="{{ url_for('auth.home') }}">NEXUS WORK</a>
+    <nav aria-label="주 메뉴">
+      <section class="nav-group">
+        <h2>업무</h2>
+        <ul>
+          <li><a href="{{ url_for('chat.chat_view') }}"{% if ep.startswith('chat.') %} aria-current="page"{% endif %}>AI 어시스턴트</a></li>
+          <li><a href="{{ url_for('approvals.approval_list') }}"{% if ep.startswith('approvals.') %} aria-current="page"{% endif %}>전자결재</a></li>
+          <li><a href="{{ url_for('erp.expense_list') }}"{% if ep.startswith('erp.expense') %} aria-current="page"{% endif %}>경비</a></li>
+          {% if privileged %}<li><a href="{{ url_for('erp.finance_list') }}"{% if ep.startswith('erp.finance') %} aria-current="page"{% endif %}>재무 보고</a></li>{% endif %}
+        </ul>
+      </section>
+      <section class="nav-group">
+        <h2>자료</h2>
+        <ul>
+          <li><a href="{{ url_for('portal.documents') }}"{% if ep in ('portal.documents', 'portal.document') %} aria-current="page"{% endif %}>문서함</a></li>
+          {% if privileged %}<li><a href="{{ url_for('portal.confidential_list') }}"{% if ep.startswith('portal.confidential') %} aria-current="page"{% endif %}>기밀 문서함</a></li>{% endif %}
+          <li><a href="{{ url_for('portal.board_list', board='notice') }}"{% if board == 'notice' %} aria-current="page"{% endif %}>공지사항</a></li>
+          <li><a href="{{ url_for('portal.board_list', board='free') }}"{% if board == 'free' %} aria-current="page"{% endif %}>자유게시판</a></li>
+          <li><a href="{{ url_for('portal.employees') }}"{% if ep == 'portal.employees' %} aria-current="page"{% endif %}>직원 검색</a></li>
+        </ul>
+      </section>
+      <section class="nav-group">
+        <h2>인사</h2>
+        <ul>
+          <li><a href="{{ url_for('erp.payroll_list') }}"{% if ep.startswith('erp.payroll') %} aria-current="page"{% endif %}>급여</a></li>
+        </ul>
+      </section>
+      {% if g.user.role == 'admin' %}
+      <section class="nav-group">
+        <h2>관리</h2>
+        <ul>
+          <li><a href="{{ url_for('admin.users') }}"{% if ep.startswith('admin.') %} aria-current="page"{% endif %}>사용자 관리</a></li>
+        </ul>
+      </section>
+      {% endif %}
+    </nav>
+    <div class="who">
+      <strong>{{ g.user.display_name }}</strong>
+      <span>{{ g.user.dept }} · {{ g.user.role }}</span>
+      <a href="{{ url_for('auth.change_password') }}">비밀번호 변경</a>
+      <form method="post" action="{{ url_for('auth.logout') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit">로그아웃</button>
+      </form>
+    </div>
+  </aside>
+{% endif %}
+  <main class="{{ 'main' if g.user else 'plain' }}" id="main">
+    {% if not g.user %}<span class="brand">NEXUS WORK</span>{% endif %}
+    {% block content %}{% endblock %}
+  </main>
+{% if g.user %}
+</div>
+{% endif %}
+</body>
+</html>

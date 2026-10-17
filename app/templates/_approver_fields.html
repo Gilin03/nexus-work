@@ -1,0 +1,11 @@
+<fieldset>
+  <legend>결재선 (위에서부터 순서대로 결재됩니다)</legend>
+  {% for n in range(1, max_steps + 1) %}
+  <label>{{ n }}차 결재자{% if n == 1 %} (필수){% endif %}
+    <select name="approver_{{ n }}"{% if n == 1 %} required{% endif %}>
+      <option value="">{% if n == 1 %}선택하세요{% else %}(없음){% endif %}</option>
+      {% for c in candidates %}<option value="{{ c.id }}">{{ c.display_name }} · {{ c.dept }} · {{ c.role }}</option>{% endfor %}
+    </select>
+  </label>
+  {% endfor %}
+</fieldset>

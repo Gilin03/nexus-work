@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}{{ post.title }} · NEXUS WORK{% endblock %}
+{% block content %}
+<a class="crumb" href="{{ url_for('portal.board_list', board=post.board) }}">&larr; {{ board_name }}</a>
+<div class="sheet">
+  <h1>{{ post.title }}</h1>
+  <p class="hint">{{ post.author }} · {{ post.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+  <div class="body">{{ post.body }}</div>
+  {% if files %}
+  <h2>첨부</h2>
+  <ul class="menu-list">
+    {% for f in files %}
+    <li><a href="{{ url_for('portal.attachment', att_id=f.id) }}">{{ f.orig_name }}</a> <span class="hint">({{ f.size }} bytes)</span></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% if can_delete %}
+  <form method="post" action="{{ url_for('portal.post_delete', post_id=post.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn danger">삭제</button>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

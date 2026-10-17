@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}경비 등록 · NEXUS WORK{% endblock %}
+{% block content %}
+<a class="crumb" href="{{ url_for('erp.expense_list') }}">&larr; 경비 목록</a>
+<h1>경비 등록</h1>
+<div class="sheet narrow">
+  {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+  <form method="post" action="{{ url_for('erp.expense_new') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>제목
+      <input name="title" required maxlength="120">
+    </label>
+    <label>금액(원, 최대 {{ '{:,}'.format(max_amount) }})
+      <input name="amount" inputmode="numeric" pattern="[0-9]+" required maxlength="9">
+    </label>
+    <button type="submit" class="btn primary">저장(임시저장)</button>
+  </form>
+</div>
+{% endblock %}

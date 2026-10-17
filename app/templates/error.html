@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}오류 {{ code }} · NEXUS WORK{% endblock %}
+{% block content %}
+<div class="sheet narrow">
+  <p class="error-code">{{ code }}</p>
+  <p>{{ message }}</p>
+  <p><a href="{{ url_for('auth.home') }}">홈으로</a></p>
+</div>
+{% endblock %}

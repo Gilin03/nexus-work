@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% from "_ui.html" import status %}
+{% block title %}경비 · NEXUS WORK{% endblock %}
+{% block content %}
+<h1>경비</h1>
+<p><a class="btn primary" href="{{ url_for('erp.expense_new') }}">경비 등록</a></p>
+<div class="sheet">
+  {% if rows %}
+  <div class="scroll">
+    <table>
+      <thead><tr><th>제목</th><th>신청자</th><th class="num">금액</th><th>상태</th><th class="num">등록일</th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <td><a href="{{ url_for('erp.expense_view', expense_id=r.id) }}">{{ r.title }}</a></td>
+          <td>{{ r.owner }}</td>
+          <td class="num">{{ r.amount | won }}</td>
+          <td>{{ status(r.status) }}</td>
+          <td class="num">{{ r.created_at.strftime('%Y-%m-%d') }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="hint">경비 내역이 없습니다.</p>
+  {% endif %}
+</div>
+{% endblock %}

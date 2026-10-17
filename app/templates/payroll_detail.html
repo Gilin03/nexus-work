@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% from "_ui.html" import conf_stamp %}
+{% block title %}급여 상세 · NEXUS WORK{% endblock %}
+{% block content %}
+<a class="crumb" href="{{ url_for('erp.payroll_list') }}">&larr; 급여 목록</a>
+<div class="sheet">
+  {{ conf_stamp() }}
+  <h1>{{ p.pay_month }} 급여</h1>
+  <table class="facts">
+    <tr><th>직원</th><td>{{ owner.display_name }} ({{ owner.dept }})</td></tr>
+    <tr><th>기본급</th><td class="num">{{ p.base_salary | won }}</td></tr>
+    <tr><th>상여</th><td class="num">{{ p.bonus | won }}</td></tr>
+    <tr><th>합계</th><td class="num"><strong>{{ (p.base_salary + p.bonus) | won }}</strong></td></tr>
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% from "_ui.html" import status %}
+{% block title %}{{ e.title }} · NEXUS WORK{% endblock %}
+{% block content %}
+<a class="crumb" href="{{ url_for('erp.expense_list') }}">&larr; 경비 목록</a>
+<div class="sheet">
+  <h1>{{ e.title }}</h1>
+  {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+  <table class="facts">
+    <tr><th>신청자</th><td>{{ e.owner }} ({{ e.owner_dept }})</td></tr>
+    <tr><th>금액</th><td class="num">{{ e.amount | won }}</td></tr>
+    <tr><th>상태</th><td>{{ status(e.status) }}</td></tr>
+    <tr><th>등록일</th><td>{{ e.created_at.strftime('%Y-%m-%d %H:%M') }}</td></tr>
+    {% if approval %}<tr><th>결재</th><td><a href="{{ url_for('approvals.approval_view', approval_id=approval.id) }}">{{ status(approval.status) }}</a></td></tr>{% endif %}
+  </table>
+  {% if can_submit %}
+  <h2>결재 상신</h2>
+  <form method="post" action="{{ url_for('erp.expense_submit', expense_id=e.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {% include "_approver_fields.html" %}
+    <button type="submit" class="btn primary">결재 상신</button>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

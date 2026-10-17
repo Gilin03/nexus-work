@@ -1,0 +1,163 @@
+/* NEXUS WORK — 서류철 톤. 사내 결재 서류(결재란·도장)의 어휘를 한 곳에 모으고, 나머지는 조용한 장부형 화면으로 둔다.
+   CSP(style-src 'self') 때문에 인라인 스타일 없이 이 파일만 사용한다. 외부 글꼴 없음(시스템 글꼴). */
+:root {
+  --paper: #f2f4f7;      /* 복사지 */
+  --sheet: #ffffff;      /* 서류 */
+  --ink: #1b2a4a;        /* 사무용 잉크 */
+  --ink-2: #566174;      /* 보조 글자 (흰 바탕 6.3:1) */
+  --line: #c5cdd8;
+  --line-soft: #e3e8ee;
+  --pen: #1f4e9e;        /* 만년필 블루: 행동·승인 (흰 바탕 7.9:1) */
+  --seal: #c8102e;       /* 인주: 반려·기밀·잠금 (흰 바탕 5.9:1) */
+  --seal-bg: #fdf1f3;
+  --side: #1b2a4a;
+  --side-text: #e6ebf3;
+  --side-muted: #9fb0cc;
+  --radius: 3px;
+  --font: "Pretendard Variable", Pretendard, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+html { font-size: 15px; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 1rem/1.65 var(--font); font-variant-numeric: tabular-nums;
+  word-break: keep-all; overflow-wrap: break-word; }  /* 한국어는 단어 중간에서 끊지 않는다 */
+a { color: var(--pen); text-underline-offset: 2px; }
+a:hover { text-decoration-thickness: 2px; }
+:focus-visible { outline: 2px solid var(--pen); outline-offset: 2px; }
+h1 { font-size: 1.55rem; line-height: 1.3; letter-spacing: -0.01em; margin: 0 0 1rem; }
+h2 { font-size: 1.1rem; line-height: 1.4; margin: 2rem 0 0.6rem; }
+p { margin: 0 0 0.8rem; }
+.hint { color: var(--ink-2); font-size: 0.9rem; }
+.skip { position: absolute; left: -999px; top: 0; background: var(--sheet); padding: 0.5rem 1rem; z-index: 10; }
+.skip:focus { left: 0; }
+
+/* ---- 셸: 왼쪽 서류철 등, 오른쪽 본문 ---- */
+.shell { display: grid; grid-template-columns: 14.5rem minmax(0, 1fr); min-height: 100vh; }
+.side { background: var(--side); color: var(--side-text); padding: 1.2rem 1rem; position: sticky; top: 0; height: 100vh; overflow-y: auto; display: flex; flex-direction: column; gap: 1.2rem; }
+.side a { color: var(--side-text); text-decoration: none; }
+.brand { font-weight: 800; font-size: 1.15rem; letter-spacing: 0.02em; }
+.nav-group { margin: 0; }
+.nav-group + .nav-group { margin-top: 1.1rem; }
+.nav-group h2 { font-size: 0.85rem; font-weight: 600; color: var(--side-muted); margin: 0 0 0.25rem; padding: 0 0.6rem; }
+.nav-group ul { list-style: none; margin: 0; padding: 0; }
+.nav-group a { display: block; padding: 0.35rem 0.6rem; border-radius: var(--radius); }
+.nav-group a:hover { background: rgba(255, 255, 255, 0.08); }
+.nav-group a[aria-current="page"] { background: rgba(255, 255, 255, 0.16); font-weight: 700; }
+.who { margin-top: auto; border-top: 1px solid rgba(255, 255, 255, 0.18); padding-top: 0.9rem; font-size: 0.9rem; }
+.who strong { display: block; font-size: 1rem; }
+.who span { color: var(--side-muted); }
+.who a { display: inline-block; margin: 0.4rem 0; text-decoration: underline; text-underline-offset: 2px; }
+.who form { margin: 0; }
+.main { padding: 2rem 2.4rem 3rem; max-width: 62rem; min-width: 0; }
+.plain { max-width: 24rem; margin: 12vh auto 0; padding: 0 1rem; }
+.plain .brand { display: block; margin-bottom: 1.2rem; font-size: 1.3rem; }
+
+/* ---- 서류 ---- */
+.sheet { position: relative; background: var(--sheet); border: 1px solid var(--line); border-radius: var(--radius); padding: 1.2rem 1.4rem; }
+.sheet.narrow { max-width: 30rem; }
+.sheet > :first-child { margin-top: 0; }
+.sheet > :last-child { margin-bottom: 0; }
+.crumb { display: inline-block; margin-bottom: 0.6rem; font-size: 0.9rem; }
+.body { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 68ch; padding: 1rem 0; border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); margin: 1rem 0; }
+
+/* ---- 장부형 표 ---- */
+.scroll { overflow-x: auto; }
+.scroll table { min-width: 34rem; }  /* 좁은 화면에서는 열을 찌그러뜨리지 않고 가로로 스크롤한다 */
+table { border-collapse: collapse; width: 100%; background: var(--sheet); }
+th, td { text-align: left; padding: 0.55rem 0.7rem; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+thead th { font-size: 0.85rem; font-weight: 700; color: var(--ink-2); border-bottom: 2px solid var(--ink); white-space: nowrap; }
+tbody tr:hover { background: #f7f9fb; }
+td.num, th.num { text-align: right; white-space: nowrap; }
+table.facts th { width: 8rem; color: var(--ink-2); font-weight: 600; border-bottom: 1px solid var(--line-soft); }
+table.facts tr:hover { background: none; }
+td.reason { white-space: pre-wrap; overflow-wrap: anywhere; }
+.menu-list { list-style: none; margin: 0 0 1rem; padding: 0; columns: 2 14rem; }
+.menu-list li { padding: 0.3rem 0; border-bottom: 1px solid var(--line-soft); break-inside: avoid; }
+
+/* ---- 상태 표시: 색뿐 아니라 글자와 테두리 모양으로도 구분 ---- */
+.st { display: inline-block; font-size: 0.82rem; font-weight: 700; line-height: 1.4; padding: 0 0.5rem; border: 1px solid currentColor; border-radius: var(--radius); white-space: nowrap; }
+.st-approved, .st-submitted { color: var(--pen); }
+.st-rejected, .st-locked { color: var(--seal); }
+.st-pending { color: var(--ink); border-style: dashed; }
+.st-draft, .st-withdrawn, .st-waiting, .st-skipped { color: var(--ink-2); font-weight: 600; }
+.st-skipped { text-decoration: line-through; }
+.flag { color: var(--seal); font-weight: 700; }
+
+/* ---- 결재란: 한국 기안문 오른쪽 위의 칸칸이 나뉜 결재 도장란 ---- */
+.seals { display: flex; flex-wrap: wrap; gap: 0; margin: 0.4rem 0 1.2rem; padding: 0; list-style: none; }
+.seal-cell { width: 6.2rem; border: 1px solid var(--ink); margin-left: -1px; background: var(--sheet); display: flex; flex-direction: column; }
+.seal-cell:first-child { margin-left: 0; }
+.seal-head { background: var(--paper); border-bottom: 1px solid var(--ink); text-align: center; font-size: 0.78rem; font-weight: 700; padding: 0.15rem 0; }
+.seal-body { min-height: 4.4rem; padding: 0.35rem 0.2rem; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.25rem; text-align: center; font-size: 0.85rem; }
+.seal-name { font-weight: 600; overflow-wrap: anywhere; line-height: 1.25; }
+.seal-cell.turn { outline: 2px dashed var(--pen); outline-offset: -4px; }
+.seal-cell.turn .seal-head { background: var(--pen); color: #fff; border-bottom-color: var(--pen); }
+.stamp { display: inline-flex; align-items: center; justify-content: center; width: 2.5rem; height: 2.5rem; border: 2px solid currentColor; border-radius: 50%; font-weight: 800; font-size: 0.82rem; box-shadow: inset 0 0 0 2px var(--sheet), inset 0 0 0 3px currentColor; transform: rotate(-8deg); }
+.stamp.ok { color: var(--pen); }
+.stamp.no { color: var(--seal); }
+.stamp.me { color: var(--ink); }
+.seal-note { color: var(--ink-2); font-size: 0.8rem; }
+
+/* ---- 기밀 도장 ---- */
+.stamp-conf { position: absolute; top: 1rem; right: 1.2rem; color: var(--seal); border: 2px solid var(--seal); outline: 1px solid var(--seal); outline-offset: 2px; padding: 0.1rem 0.7rem; font-weight: 800; letter-spacing: 0.3em; transform: rotate(-3deg); background: var(--sheet); }
+
+/* ---- 입력 ---- */
+form { margin: 0; }
+label, .field { display: block; margin: 0 0 0.9rem; font-weight: 600; font-size: 0.92rem; }
+input, select, textarea { display: block; width: 100%; max-width: 26rem; margin-top: 0.25rem; padding: 0.5rem 0.6rem; font: inherit; font-weight: 400; color: var(--ink); background: var(--sheet); border: 1px solid #8e9bb0; border-radius: var(--radius); }
+textarea { max-width: 40rem; }
+input[type="file"] { padding: 0.35rem; }
+select { max-width: 20rem; }
+fieldset { border: 1px solid var(--line); border-radius: var(--radius); margin: 0 0 1rem; padding: 0.6rem 1rem 0.2rem; background: var(--sheet); }
+legend { font-weight: 700; padding: 0 0.4rem; font-size: 0.92rem; }
+.btn, button { display: inline-block; padding: 0.45rem 0.95rem; font: inherit; font-weight: 600; color: var(--ink); background: var(--sheet); border: 1px solid var(--ink); border-radius: var(--radius); cursor: pointer; text-decoration: none; line-height: 1.4; }
+.btn:hover, button:hover { background: var(--paper); }
+.btn.primary, button.primary { background: var(--pen); border-color: var(--pen); color: #fff; }
+.btn.primary:hover, button.primary:hover { background: #173d7c; }
+.btn.danger, button.danger { color: var(--seal); border-color: var(--seal); }
+.btn.danger:hover, button.danger:hover { background: var(--seal-bg); }
+.actions { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 0.4rem; }
+form.inline { display: inline; }
+form.inline select, form.inline input { display: inline-block; width: auto; margin: 0; padding: 0.3rem 0.4rem; }
+form.inline button { padding: 0.3rem 0.7rem; }
+.alert { border: 1px solid var(--seal); background: var(--seal-bg); color: #8f0c21; padding: 0.6rem 0.8rem; border-radius: var(--radius); margin: 0 0 1rem; font-weight: 600; }
+.pager { display: flex; gap: 1rem; margin-top: 1rem; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 0.8rem; align-items: center; margin: 0 0 1rem; }
+
+/* ---- 대화 기록: 서류 대장처럼 한 건씩 줄로 쌓는다(말풍선 없음). 화자는 글자로 구분한다 ---- */
+.thread { list-style: none; margin: 0 0 1.2rem; padding: 0; border-top: 2px solid var(--ink); }
+.msg { padding: 0.7rem 0.2rem; border-bottom: 1px solid var(--line-soft); }
+.msg-assistant { background: #f7f9fb; padding-left: 0.8rem; padding-right: 0.8rem; }
+.msg-head { display: flex; gap: 0.8rem; align-items: baseline; margin-bottom: 0.2rem; }
+.msg-who { font-weight: 700; }
+.msg-assistant .msg-who { color: var(--pen); }
+.msg-head time { color: var(--ink-2); font-size: 0.82rem; }
+.msg-body { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 68ch; }
+.composer textarea { max-width: 100%; }
+
+/* ---- 오류 화면 ---- */
+.error-code { font-size: 4rem; font-weight: 800; line-height: 1; color: var(--ink); margin: 0 0 0.5rem; }
+
+/* ---- 좁은 화면: 왼쪽 등이 위쪽 띠로, 표는 가로 스크롤 ---- */
+@media (max-width: 860px) {
+  .shell { grid-template-columns: minmax(0, 1fr); }
+  .side { position: static; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 0.6rem 1.2rem; padding: 0.7rem 1rem; }
+  .side nav { order: 3; flex-basis: 100%; display: flex; gap: 1rem; overflow-x: auto; padding-bottom: 0.3rem; }
+  .nav-group { flex: none; }
+  .nav-group ul { display: flex; gap: 0.2rem; }
+  .nav-group a { white-space: nowrap; }
+  .who { margin: 0 0 0 auto; border: 0; padding: 0; display: flex; gap: 0.8rem; align-items: center; }
+  .who strong { display: inline; white-space: nowrap; }
+  .who span { display: none; }  /* 부서·권한은 홈 화면에서 확인 */
+  .who a, .who form button { white-space: nowrap; }
+  .who form button { padding: 0.3rem 0.6rem; }
+  .seals { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 0.3rem; }
+  .seal-cell { width: 5.2rem; flex: none; }
+  .seal-body { padding: 0.35rem 0.1rem; }
+  .seal-name { font-size: 0.8rem; }
+  .main { padding: 1.2rem 1rem 2rem; }
+  .sheet { padding: 1rem; }
+  .stamp-conf { position: static; display: inline-block; margin-bottom: 0.6rem; }
+  table { font-size: 0.92rem; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }

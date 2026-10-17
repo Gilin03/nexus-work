@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% from "_ui.html" import conf_stamp %}
+{% block title %}{{ doc.title }} · NEXUS WORK{% endblock %}
+{% block content %}
+<a class="crumb" href="{{ back }}">&larr; 목록</a>
+<div class="sheet">
+  {% if confidential %}{{ conf_stamp() }}{% endif %}
+  <h1>{{ doc.title }}</h1>
+  <p class="hint">{{ doc.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+  <div class="body">{{ doc.body }}</div>
+</div>
+{% endblock %}

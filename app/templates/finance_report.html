@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% from "_ui.html" import conf_stamp %}
+{% block title %}{{ r.title }} · NEXUS WORK{% endblock %}
+{% block content %}
+<a class="crumb" href="{{ url_for('erp.finance_list') }}">&larr; 재무 보고</a>
+<div class="sheet">
+  {{ conf_stamp() }}
+  <h1>{{ r.title }}</h1>
+  <p class="hint">{{ r.report_month }}</p>
+  <div class="body">{{ r.body }}</div>
+</div>
+{% endblock %}
