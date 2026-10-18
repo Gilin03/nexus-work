@@ -21,6 +21,14 @@ GRANT UPDATE (status, current_step, decided_at) ON `__DB__`.approvals TO 'nexus_
 GRANT SELECT, INSERT         ON `__DB__`.approval_steps TO 'nexus_app'@'%';
 GRANT UPDATE (status, reason, decided_at)       ON `__DB__`.approval_steps TO 'nexus_app'@'%';
 
+-- 메신저(nexus-messenger)용 표. 토큰은 발급·조회·폐기(revoked_at)만, 삭제는 없다(감사 흔적 유지).
+GRANT SELECT, INSERT              ON `__DB__`.api_tokens           TO 'nexus_app'@'%';
+GRANT UPDATE (revoked_at)         ON `__DB__`.api_tokens           TO 'nexus_app'@'%';
+GRANT SELECT, INSERT              ON `__DB__`.conversations        TO 'nexus_app'@'%';
+GRANT SELECT, INSERT              ON `__DB__`.conversation_members TO 'nexus_app'@'%';
+GRANT UPDATE (last_read_message_id) ON `__DB__`.conversation_members TO 'nexus_app'@'%';
+GRANT SELECT, INSERT              ON `__DB__`.messenger_messages   TO 'nexus_app'@'%';
+
 -- 기밀 표 전용 계정: 읽기만, 그 표들만. 앱은 기밀 권한 확인을 통과한 뒤에만 이 계정을 쓴다.
 GRANT SELECT ON `__DB__`.confidential_documents TO 'nexus_conf'@'%';
 GRANT SELECT ON `__DB__`.payroll                TO 'nexus_conf'@'%';

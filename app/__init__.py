@@ -1,7 +1,7 @@
 from flask import Flask, jsonify, render_template, request
 from werkzeug.exceptions import HTTPException
 
-from . import admin, approvals, auth, chat, db, erp, portal, security
+from . import admin, approvals, auth, chat, db, erp, messenger_api, portal, realtime, security
 from .config import Config
 
 ERROR_TEXT = {
@@ -34,6 +34,8 @@ def create_app(overrides=None):
     app.register_blueprint(approvals.bp)
     app.register_blueprint(admin.bp)
     app.register_blueprint(chat.bp)
+    app.register_blueprint(messenger_api.bp)  # 메신저(nexus-messenger) 토큰 인증 JSON API, /api/v1/*
+    realtime.init_app(app)  # 메신저 실시간 전송(Socket.IO)
     app.config.setdefault("CHAT_RESPONDER", chat.placeholder_responder)  # 실제 AI 연결은 다른 담당이 이 값을 교체한다
     app.jinja_env.filters["won"] = lambda n: f"{int(n):,}원"
     app.jinja_env.filters["status_label"] = lambda s: STATUS_LABEL.get(s, s)

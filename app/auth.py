@@ -103,10 +103,52 @@ def _start_session(user_id, session_version, keep_iat=None):
     csrf_token()
 
 
-def _login_failed(reason, event="login_failure", name="-"):
+def _log_login_failure(reason, event="login_failure", name="-"):
     log_event(event, "DENY", reason, user=name[:64])
     db.commit()  # 오류 응답이라도 실패 횟수는 남겨야 한다
-    return render_template("login.html", error=GENERIC_LOGIN_ERROR), 401
+
+
+def authenticate(raw_name: str, password: str):
+    """아이디·비밀번호 확인(계정 열거 방지·잠금 모두 동일 적용). 쿠키 로그인(/login)과 메신저
+    토큰 로그인(/api/v1/login)이 함께 쓴다 — 브루트포스 방어를 두 곳에 따로 두지 않는다.
+    성공하면 (row, None), 실패하면 (None, 사유코드)를 돌려준다. 실패 쪽은 이벤트 기록·커밋까지 끝낸다."""
+    try:
+        name = validators.username(raw_name)
+    except ValueError:
+        name = None
+    if len(password) > 256:  # 비정상적으로 긴 입력은 해시 계산 없이 실패 처리
+        password = ""
+
+    row = None
+    if name:
+        row = db.query_one(
+            "SELECT id, username, password_hash, role, display_name, dept, session_version, "
+            "(locked_until IS NOT NULL AND locked_until > NOW()) AS is_locked "
+            "FROM users WHERE username = %s FOR UPDATE", (name,))
+
+    password_ok = verify_password(row["password_hash"] if row else _DUMMY_HASH, password)
+
+    if not row:
+        _log_login_failure("unknown_user" if name else "invalid_format", name=raw_name)
+        return None, "invalid_credentials"
+    if row["is_locked"]:  # 잠긴 동안은 맞는 비밀번호도 거부하고, 횟수는 올리지 않는다
+        _log_login_failure("account_locked", "login_locked", row["username"])
+        return None, "account_locked"
+    if not password_ok:
+        locked = _register_failure(row["id"])
+        if locked:
+            log_event("account_locked", "BLOCK", "max_failures", user=row["username"])
+        _log_login_failure("bad_password", name=row["username"])
+        return None, "invalid_credentials"
+
+    # 성공
+    new_hash = _ph.hash(password) if _ph.check_needs_rehash(row["password_hash"]) else None
+    if new_hash:
+        db.execute("UPDATE users SET password_hash = %s, failed_count = 0, locked_until = NULL WHERE id = %s",
+                   (new_hash, row["id"]))
+    else:
+        db.execute("UPDATE users SET failed_count = 0, locked_until = NULL WHERE id = %s", (row["id"],))
+    return row, None
 
 
 # ---- 화면 ----
@@ -131,39 +173,10 @@ def login():
 
     raw_name = request.form.get("username", "").strip().lower()
     password = request.form.get("password", "")
-    try:
-        name = validators.username(raw_name)
-    except ValueError:
-        name = None
-    if len(password) > 256:  # 비정상적으로 긴 입력은 해시 계산 없이 실패 처리
-        password = ""
-
-    row = None
-    if name:
-        row = db.query_one(
-            "SELECT id, username, password_hash, role, display_name, dept, session_version, "
-            "(locked_until IS NOT NULL AND locked_until > NOW()) AS is_locked "
-            "FROM users WHERE username = %s FOR UPDATE", (name,))
-
-    password_ok = verify_password(row["password_hash"] if row else _DUMMY_HASH, password)
-
+    row, _reason = authenticate(raw_name, password)
     if not row:
-        return _login_failed("unknown_user" if name else "invalid_format", name=raw_name)
-    if row["is_locked"]:  # 잠긴 동안은 맞는 비밀번호도 거부하고, 횟수는 올리지 않는다
-        return _login_failed("account_locked", "login_locked", row["username"])
-    if not password_ok:
-        locked = _register_failure(row["id"])
-        if locked:
-            log_event("account_locked", "BLOCK", "max_failures", user=row["username"])
-        return _login_failed("bad_password", name=row["username"])
+        return render_template("login.html", error=GENERIC_LOGIN_ERROR), 401
 
-    # 성공
-    new_hash = _ph.hash(password) if _ph.check_needs_rehash(row["password_hash"]) else None
-    if new_hash:
-        db.execute("UPDATE users SET password_hash = %s, failed_count = 0, locked_until = NULL WHERE id = %s",
-                   (new_hash, row["id"]))
-    else:
-        db.execute("UPDATE users SET failed_count = 0, locked_until = NULL WHERE id = %s", (row["id"],))
     _start_session(row["id"], row["session_version"])
     g.user = {k: row[k] for k in ("id", "username", "role", "display_name", "dept")}
     log_event("login_success", "ALLOW", "ok")

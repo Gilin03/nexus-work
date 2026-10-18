@@ -14,6 +14,7 @@
 | AI 어시스턴트 | 대화 화면과 본인 대화 기록. 응답 생성부는 교체 가능한 접점(`CHAT_RESPONDER`)이고 기본값은 시험 응답 |
 | 관리자 | 사용자 목록, 역할 변경, 잠금 해제 |
 | 보안 로그 | 모든 보안 이벤트를 JSON 한 줄로 `logs/security.jsonl`에 기록(탐지 담당이 수집) |
+| 메신저 연동 | 별도 네이티브 앱(nexus-messenger)이 토큰으로 로그인해 1:1·그룹 채팅하는 `/api/v1/*` API + Socket.IO 실시간 전송. 자세히는 [docs/02_메신저_API.md](docs/02_메신저_API.md) |
 
 ## 보안 설계 요약
 
@@ -75,6 +76,7 @@ python run.py
 ```bash
 python -m pytest -q                                   # 전체 자동 시험(453개, MySQL 컨테이너 필요)
 python scripts/defense_check.py --report 결과.md      # 방어 점검 18항목(서버를 띄운 상태에서, 루프백만 허용)
+python scripts/red_team_extra.py --report 결과2.md    # 추가 공격 패턴 20항목(같은 전제, SSTI·동시성 경쟁 등)
 ```
 
 - 자동 시험은 DB 권한, 입력 검증, 인증·세션, 인가, 업로드, 결재 규칙, 화면 접근성과 색 대비, 정적 점검(위험 패턴·공개 경로·비밀값)을 다룹니다. MySQL이 없으면 DB가 필요한 시험은 건너뜁니다.
@@ -83,13 +85,13 @@ python scripts/defense_check.py --report 결과.md      # 방어 점검 18항목
 ## 폴더 구조
 
 ```
-app/            Flask 앱 (auth, portal, erp, approvals, admin, chat, security, db, validators, uploads)
+app/            Flask 앱 (auth, portal, erp, approvals, admin, chat, messenger_api, realtime, security, db, validators, uploads)
   templates/    화면    static/  스타일(CSP 때문에 외부 글꼴·인라인 스타일 없음)
 db/             schema.sql, grants.sql(최소권한), init.sh(컨테이너 최초 기동 때 실행)
-scripts/        seed.py(시험 데이터), defense_check.py(방어 점검)
+scripts/        seed.py(시험 데이터), defense_check.py·red_team_extra.py(방어 점검)
 tests/          pytest 시험
-docs/           설계·검증·트러블슈팅 문서
-run.py          개발·시연용 실행(서버 버전 비노출, 기본 루프백)
+docs/           설계·검증·트러블슈팅·메신저 API 문서
+run.py          개발·시연용 실행(서버 버전 비노출, 기본 루프백, Socket.IO 포함)
 ```
 
 ## 다른 담당과 맞닿는 곳
@@ -98,11 +100,12 @@ run.py          개발·시연용 실행(서버 버전 비노출, 기본 루프�
 - **AI·Gateway:** `app.config["CHAT_RESPONDER"]`를 `responder(user, message, history) -> str`로 교체해 연결합니다. 챗봇의 권한은 현재 로그인한 사용자를 넘을 수 없습니다([app/chat.py](app/chat.py) 머리말).
 - **Gateway:** 기밀 표는 `nexus_conf` 계정(읽기 전용)으로만 읽습니다.
 - **자동 대응(n8n):** 앱은 사용자·역할·잠금을 요청마다 DB에서 다시 읽으므로 `users.locked_until`·`role`·`session_version`을 바꾸면 즉시 반영됩니다([실측_검증계획_A.md 5절](docs/실측_검증계획_A.md)).
+- **메신저(nexus-messenger, 별도 Flutter 프로젝트):** 토큰 인증 `/api/v1/*` + Socket.IO. 전체 스펙은 [docs/02_메신저_API.md](docs/02_메신저_API.md).
 
 ## 알려진 한계
 
-직접 만든 대표 탐침으로 점검했고 외부 침투 도구·의존성 취약점 점검은 하지 않았습니다. HTTPS(Secure 쿠키)·부하·로그 원격 전송은 검증하지 않았고, 속도 제한은 서버 프로세스 메모리 기반입니다. 자세한 내용은 [실측_검증계획_A.md 6절](docs/실측_검증계획_A.md)을 보세요.
+직접 만든 대표 탐침으로 점검했고(블랙박스 도구로도 추가 확인함 — nmap·nikto·gobuster·sqlmap·hydra, 전부 이상 없음) 의존성 취약점 점검은 하지 않았습니다. HTTPS(Secure 쿠키)·부하·로그 원격 전송은 검증하지 않았고, 속도 제한은 서버 프로세스 메모리 기반이라 **여러 실제 IP를 가진 공격자에게는 IP별로 따로 적용됩니다**(IP 기반 속도 제한의 일반적 한계). 자세한 내용은 [실측_검증계획_A.md 6절](docs/실측_검증계획_A.md)을 보세요.
 
 ## 문서
 
-[docs/01_기획.md](docs/01_기획.md) · [docs/검증안내서.md](docs/검증안내서.md) · [docs/실측_검증계획_A.md](docs/실측_검증계획_A.md) · [docs/검증결과_A_2026-10-17.md](docs/검증결과_A_2026-10-17.md) · [docs/트러블슈팅.md](docs/트러블슈팅.md) · [작업내역_체크리스트.md](작업내역_체크리스트.md)
+[docs/01_기획.md](docs/01_기획.md) · [docs/02_메신저_API.md](docs/02_메신저_API.md) · [docs/검증안내서.md](docs/검증안내서.md) · [docs/실측_검증계획_A.md](docs/실측_검증계획_A.md) · [docs/검증결과_A_2026-10-17.md](docs/검증결과_A_2026-10-17.md) · [docs/트러블슈팅.md](docs/트러블슈팅.md) · [VULN-FINDINGS.md](VULN-FINDINGS.md) · [작업내역_체크리스트.md](작업내역_체크리스트.md)

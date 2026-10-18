@@ -90,6 +90,10 @@ def csrf_token() -> str:
 def check_csrf():
     if request.method in ("GET", "HEAD", "OPTIONS"):
         return
+    if request.path.startswith("/api/v1/"):
+        # 메신저(nexus-messenger)용 토큰 인증 API. 쿠키를 전혀 쓰지 않으므로(Authorization 헤더만
+        # 신뢰) 브라우저가 자동으로 실어 보내는 쿠키를 노리는 CSRF가 애초에 성립하지 않는다.
+        return
     sent = request.headers.get("X-CSRF-Token") or request.form.get("csrf_token", "")
     expected = session.get("csrf", "")
     if not expected or not hmac.compare_digest(sent.encode(), expected.encode()):

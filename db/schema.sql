@@ -145,3 +145,51 @@ BEGIN
   END IF;
 END//
 DELIMITER ;
+
+-- ===== 메신저(별도 앱: nexus-messenger)용 표. 계정은 users 를 그대로 쓴다. =====
+
+-- 모바일·데스크톱 클라이언트 인증용 토큰. 토큰 평문은 저장하지 않고 sha256 해시만 둔다
+-- (로그인 쿠키·CSRF 와는 별개 체계 — 네이티브 앱은 쿠키를 못 쓰므로).
+CREATE TABLE api_tokens (
+  id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  user_id    INT UNSIGNED NOT NULL,
+  token_hash CHAR(64)     NOT NULL UNIQUE,
+  device     VARCHAR(120) NOT NULL DEFAULT '',
+  created_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  expires_at DATETIME     NOT NULL,
+  revoked_at DATETIME     NULL,
+  KEY idx_tokens_user (user_id),
+  FOREIGN KEY (user_id) REFERENCES users(id)
+) ENGINE=InnoDB;
+
+-- 대화방: 1:1(dm) 또는 그룹(group). dm 은 이름이 없다(참가자 이름으로 화면에 표시).
+CREATE TABLE conversations (
+  id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  kind       ENUM('dm','group') NOT NULL,
+  name       VARCHAR(120) NULL,
+  created_by INT UNSIGNED NOT NULL,
+  created_at TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (created_by) REFERENCES users(id)
+) ENGINE=InnoDB;
+
+CREATE TABLE conversation_members (
+  conversation_id      INT UNSIGNED NOT NULL,
+  user_id              INT UNSIGNED NOT NULL,
+  joined_at            TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_read_message_id INT UNSIGNED NOT NULL DEFAULT 0,
+  PRIMARY KEY (conversation_id, user_id),
+  KEY idx_members_user (user_id),
+  FOREIGN KEY (conversation_id) REFERENCES conversations(id),
+  FOREIGN KEY (user_id) REFERENCES users(id)
+) ENGINE=InnoDB;
+
+CREATE TABLE messenger_messages (
+  id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  conversation_id INT UNSIGNED  NOT NULL,
+  sender_id       INT UNSIGNED  NOT NULL,
+  body            VARCHAR(4000) NOT NULL,
+  created_at      TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_msg_conv (conversation_id, id),
+  FOREIGN KEY (conversation_id) REFERENCES conversations(id),
+  FOREIGN KEY (sender_id) REFERENCES users(id)
+) ENGINE=InnoDB;

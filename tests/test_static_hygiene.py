@@ -45,13 +45,20 @@ def test_banned_pattern_checker_detects_each_kind():
 
 # ---------- 실수로 공개된 경로가 없는가 ----------
 def test_no_route_is_accidentally_public(app, client):
+    # /api/v1/* 는 쿠키 세션이 아니라 Authorization 토큰으로 인증하는 별도 체계라
+    # (메신저 앱용) CSRF 단계가 아예 적용되지 않는다(security.check_csrf 의 경로 예외).
+    # 그래서 로그인 없이 보내면 403(CSRF)이 아니라 401(토큰 없음/자격증명 틀림)이 맞다.
     public = set()
     for rule in app.url_map.iter_rules():
         if rule.endpoint == "static":
             continue
         path = re.sub(r"<[^>]+>", "1", rule.rule)
+        is_token_api = path.startswith("/api/v1/")
         for method in rule.methods - {"HEAD", "OPTIONS"}:
             r = client.open(path, method=method)
+            if is_token_api:
+                assert r.status_code == 401, (method, path, r.status_code)
+                continue
             if method == "GET":
                 if r.status_code == 200:
                     public.add(path)
