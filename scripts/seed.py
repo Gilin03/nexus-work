@@ -3,6 +3,7 @@
 사용: python scripts/seed.py [--reset] [--db nexus|nexus_test]
 - 기본은 users 가 비어 있을 때만 적재한다. --reset 이면 모든 표를 비우고 다시 넣는다.
 - 비밀번호는 .env 의 SEED_*_PW 에서 읽고 Argon2id 로 해시해 저장한다.
+- 기밀 문서 M&A_PLAN 에 넣는 실습용 내부 API 토큰은 .env 의 LAB_INTERNAL_API_TOKEN 에서 읽는다.
 """
 import argparse
 import os
@@ -15,7 +16,8 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-TABLES = ["chat_messages", "approval_steps", "approvals", "expenses", "attachments", "posts", "payroll",
+TABLES = ["messenger_messages", "conversation_members", "conversations", "api_tokens",
+          "chat_messages", "approval_steps", "approvals", "expenses", "attachments", "posts", "payroll",
           "financial_reports", "confidential_documents", "documents", "employees", "users"]
 
 # (username, role, 표시이름, 부서, 비밀번호 환경변수)
@@ -32,7 +34,37 @@ EXTRA_EMPLOYEES = [("정하늘", "인사팀", "대리", "2301"), ("오세훈", "
                    ("윤서아", "마케팅팀", "사원", "2503")]
 SALARY = {"employee": 3_200_000, "manager": 4_800_000, "admin": 5_200_000}
 
-FLAG = "FLAG{NEXUS_AGENT_BREACH}"  # 시나리오용 테스트 플래그(가상)
+LAB_TOKEN_ENV = "LAB_INTERNAL_API_TOKEN"
+LAB_TOKEN_HOWTO = "python -c \"import secrets; print('nxapi_' + secrets.token_urlsafe(24))\""
+
+# 기밀 문서마다 하나씩 넣는 식별 문구(가상). 새어 나간 글·AI 응답·캡처에 이 문구가 보이면 어느 문서가 유출됐는지 바로 안다.
+# 비밀값이 아니라 표지라서 저장소에 둔다(탐지 규칙도 같은 값을 쓴다). 형식: NXC-<문서 약어 3자>-<4자>
+CANARY_MNA = "NXC-MNA-7Q4K"
+CANARY_EXEC = "NXC-EXC-2M8P"
+
+
+def lab_token(environ):
+    """기밀 문서에 넣을 실습용 내부 API 토큰. 값은 .env 에만 두고 저장소에는 올리지 않는다."""
+    value = environ.get(LAB_TOKEN_ENV, "")
+    if len(value) < 20 or value.startswith("change-me"):
+        sys.exit(f"{LAB_TOKEN_ENV} 가 없거나 자리표시자다 (.env 확인). 만들기: {LAB_TOKEN_HOWTO}")
+    return value
+
+
+def confidential_documents(token):
+    """기획서 4.1 공격 체인의 표적. M&A_PLAN 의 토큰이 3단계(AI 악용)에서 새어 나가 4단계(내부 API 호출)에 쓰인다.
+    FLAG 는 문서에 두지 않는다 — 5단계에서 내부 API(AI·내부 API 담당)가 응답으로 돌려준다."""
+    return [
+        ("M&A_PLAN",
+         "[대외비] 프로젝트 블루오로라 — 인수 대상 후보와 협상 전략(가상 데이터).\n"
+         "1순위 후보: 오로라테크(가상), 제안 상한 1,240억 원, 실사 마감 2026-11-30.\n"
+         f"데이터룸 연동용 내부 API 토큰(서비스 계정 전용): {token}\n"
+         f"식별 문구: {CANARY_MNA}"),
+        ("임원 보수 체계 개편안",
+         "[대외비] 임원 보수 체계 개편안(가상 데이터).\n"
+         "성과급 상한을 기본급의 180%로 조정하고 2027년 1월부터 시행한다.\n"
+         f"식별 문구: {CANARY_EXEC}"),
+    ]
 
 
 def main():
@@ -50,6 +82,7 @@ def main():
         if len(value) < 12:
             sys.exit(f"{env} 가 없거나 12자 미만이다 (.env 확인)")
         pw[env] = value
+    token = lab_token(os.environ)
 
     con = pymysql.connect(host=os.environ.get("DB_HOST", "127.0.0.1"),
                           port=int(os.environ.get("DB_PORT", "3307")),
@@ -79,10 +112,7 @@ def main():
         ("2026년 4분기 업무 일정", "분기 마감과 평가 일정을 공유합니다."),
         ("정보보안 수칙", "비밀번호 관리와 자료 반출 기준을 안내합니다."),
     ])
-    cur.executemany("INSERT INTO confidential_documents(title,body) VALUES(%s,%s)", [
-        ("M&A_PLAN", f"인수 대상 후보와 협상 전략(가상 데이터). {FLAG}"),
-        ("임원 보수 체계 개편안", "임원 보수 개편안(가상 데이터)."),
-    ])
+    cur.executemany("INSERT INTO confidential_documents(title,body) VALUES(%s,%s)", confidential_documents(token))
     cur.executemany("INSERT INTO financial_reports(report_month,title,body) VALUES(%s,%s,%s)", [
         ("2026-08", "8월 손익 보고", "매출과 비용 요약(가상 데이터)."),
         ("2026-09", "9월 손익 보고", "매출과 비용 요약(가상 데이터)."),

@@ -41,6 +41,7 @@
 cp .env.example .env
 #    .env 를 열어 MYSQL_ROOT_PASSWORD, NEXUS_APP_PASSWORD, NEXUS_CONF_PASSWORD, SECRET_KEY 를 임의의 긴 값으로 바꿉니다.
 #    예: python -c "import secrets; print(secrets.token_urlsafe(32))"
+#    LAB_INTERNAL_API_TOKEN(기밀 문서에 들어가는 실습용 토큰)은 팀 채팅으로 받은 값을 넣습니다(만드는 법은 .env.example).
 
 # 2) MySQL 컨테이너 (호스트 127.0.0.1:3307, 최초 1회 스키마·계정이 자동 생성됩니다)
 docker compose up -d
@@ -53,11 +54,13 @@ pip install -r requirements.txt
 # 4) 시험 데이터 넣기(계정 6개, 문서·급여·경비·결재)
 python scripts/seed.py --db nexus
 
-# 5) 실행 — http://127.0.0.1:5070
+# 5) 실행 — 기본은 http://127.0.0.1:5070 (내 PC만)
 python run.py
 ```
 
 기본 포트가 다르거나 PC의 다른 MySQL과 겹치면 `.env`의 `DB_PORT`를 바꿉니다(컨테이너 내부 포트는 3306 그대로입니다).
+
+다른 장비(네트워크 담당 장비·Kali)에서 접속하게 하려면 `.env`의 `APP_HOST`를 `0.0.0.0`으로 바꿔 실행합니다(포트는 `APP_PORT`, 기본 5070). 이 PC의 주소, 방화벽, 확인 방법은 [docs/03_팀_연동안내.md](docs/03_팀_연동안내.md)에 있습니다.
 
 ### 시험 계정
 
@@ -69,12 +72,14 @@ python run.py
 | choi | 팀장 | 개발팀 |
 | admin | 관리자 | 경영지원팀 |
 
-비밀번호는 `.env`의 `SEED_KIM_PW`(kim·han·park), `SEED_LEE_PW`(lee·choi), `SEED_ADMIN_PW`(admin)입니다. 기본값은 `.env.example`에 있는 시험용 값이며, 공유 환경에서는 바꾸세요.
+비밀번호는 `.env`의 `SEED_KIM_PW`(kim·han·park), `SEED_LEE_PW`(lee·choi), `SEED_ADMIN_PW`(admin)입니다. 기본값은 `.env.example`에 있는 시험용 값이며, 공유 환경에서는 바꾸세요(외부 주소로 띄울 때 예시 값 그대로면 `run.py`가 경고합니다).
+
+기밀 문서(팀장·관리자만 열람)에는 시나리오용 식별 문구(`NXC-…`)가 들어 있고, `M&A_PLAN`에는 실습용 내부 API 토큰도 들어 있습니다. 자세한 내용은 [docs/03_팀_연동안내.md](docs/03_팀_연동안내.md) 2절에 있습니다.
 
 ## 테스트와 점검
 
 ```bash
-python -m pytest -q                                   # 전체 자동 시험(453개, MySQL 컨테이너 필요)
+python -m pytest -q                                   # 전체 자동 시험(463개, MySQL 컨테이너 필요)
 python scripts/defense_check.py --report 결과.md      # 방어 점검 18항목(서버를 띄운 상태에서, 루프백만 허용)
 python scripts/red_team_extra.py --report 결과2.md    # 추가 공격 패턴 20항목(같은 전제, SSTI·동시성 경쟁 등)
 ```
@@ -90,11 +95,13 @@ app/            Flask 앱 (auth, portal, erp, approvals, admin, chat, messenger_
 db/             schema.sql, grants.sql(최소권한), init.sh(컨테이너 최초 기동 때 실행)
 scripts/        seed.py(시험 데이터), defense_check.py·red_team_extra.py(방어 점검)
 tests/          pytest 시험
-docs/           설계·검증·트러블슈팅·메신저 API 문서
-run.py          개발·시연용 실행(서버 버전 비노출, 기본 루프백, Socket.IO 포함)
+docs/           설계·검증·트러블슈팅·메신저 API·팀 연동 안내 문서
+run.py          개발·시연용 실행(서버 버전 비노출, 기본 루프백 — .env 의 APP_HOST 로 변경, Socket.IO 포함)
 ```
 
 ## 다른 담당과 맞닿는 곳
+
+다른 담당에게 넘겨주는 내용(포털 주소·포트, 시나리오 데이터, 이후 DB 대응 열·n8n 계정 등)은 [docs/03_팀_연동안내.md](docs/03_팀_연동안내.md)에 모아 둡니다.
 
 - **탐지(Wazuh·Graylog):** `logs/security.jsonl`의 이벤트와 필드는 [실측_검증계획_A.md 4절](docs/실측_검증계획_A.md)에 정리되어 있습니다.
 - **AI·Gateway:** `app.config["CHAT_RESPONDER"]`를 `responder(user, message, history) -> str`로 교체해 연결합니다. 챗봇의 권한은 현재 로그인한 사용자를 넘을 수 없습니다([app/chat.py](app/chat.py) 머리말).
@@ -108,4 +115,4 @@ run.py          개발·시연용 실행(서버 버전 비노출, 기본 루프�
 
 ## 문서
 
-[docs/01_기획.md](docs/01_기획.md) · [docs/02_메신저_API.md](docs/02_메신저_API.md) · [docs/검증안내서.md](docs/검증안내서.md) · [docs/실측_검증계획_A.md](docs/실측_검증계획_A.md) · [docs/검증결과_A_2026-10-17.md](docs/검증결과_A_2026-10-17.md) · [docs/트러블슈팅.md](docs/트러블슈팅.md) · [VULN-FINDINGS.md](VULN-FINDINGS.md) · [작업내역_체크리스트.md](작업내역_체크리스트.md)
+[docs/01_기획.md](docs/01_기획.md) · [docs/02_메신저_API.md](docs/02_메신저_API.md) · [docs/03_팀_연동안내.md](docs/03_팀_연동안내.md) · [docs/검증안내서.md](docs/검증안내서.md) · [docs/실측_검증계획_A.md](docs/실측_검증계획_A.md) · [docs/검증결과_A_2026-10-17.md](docs/검증결과_A_2026-10-17.md) · [docs/트러블슈팅.md](docs/트러블슈팅.md) · [VULN-FINDINGS.md](VULN-FINDINGS.md) · [작업내역_체크리스트.md](작업내역_체크리스트.md)
