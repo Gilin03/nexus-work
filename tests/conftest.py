@@ -12,7 +12,8 @@ from app import create_app, security  # noqa: E402
 @pytest.fixture()
 def app(tmp_path):
     security.reset_rate_limits()
-    app = create_app({"TESTING": True, "LOG_DIR": tmp_path / "logs", "SESSION_COOKIE_SECURE": False})
+    app = create_app({"TESTING": True, "LOG_DIR": tmp_path / "logs", "SESSION_COOKIE_SECURE": False,
+                      "GRAYLOG_GELF_ENABLED": False})
     app.log_path = tmp_path / "logs" / "security.jsonl"
     return app
 

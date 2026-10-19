@@ -36,6 +36,9 @@ class Config:
         self.MAX_CONTENT_LENGTH = 2 * 1024 * 1024
         self.UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", BASE_DIR / "instance" / "uploads"))
         self.LOG_DIR = Path(os.environ.get("LOG_DIR", BASE_DIR / "logs"))
+        self.GRAYLOG_GELF_ENABLED = os.environ.get("GRAYLOG_GELF_ENABLED", "0") == "1"
+        self.GRAYLOG_GELF_HOST = os.environ.get("GRAYLOG_GELF_HOST", "127.0.0.1")
+        self.GRAYLOG_GELF_PORT = int(os.environ.get("GRAYLOG_GELF_PORT", "12201"))
 
         # 로그인 방어
         self.LOGIN_MAX_FAILURES = 5

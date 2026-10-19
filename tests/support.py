@@ -21,6 +21,7 @@ def connect_root():
 
 def cleanup(con):
     with con.cursor() as cur:
+        cur.execute("DELETE FROM security_auth_events WHERE username LIKE 'zz\\_%'")
         cur.execute(f"DELETE FROM posts WHERE author_id IN {_ZZ}")
         cur.execute(f"DELETE FROM approval_steps WHERE approver_id IN {_ZZ} "
                     f"OR approval_id IN (SELECT id FROM approvals WHERE requester_id IN {_ZZ})")
