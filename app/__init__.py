@@ -1,7 +1,7 @@
 from flask import Flask, g, jsonify, render_template, request
 from werkzeug.exceptions import HTTPException
 
-from . import admin, approvals, auth, chat, db, erp, formats, hr, messenger_api, portal, profile, realtime, security
+from . import admin, approvals, auth, chat, db, erp, formats, hr, library, messenger_api, permissions, portal, profile, realtime, security, work
 from .config import Config
 
 ERROR_TEXT = {
@@ -36,6 +36,8 @@ def create_app(overrides=None):
     app.register_blueprint(chat.bp)
     app.register_blueprint(profile.bp)
     app.register_blueprint(hr.bp)
+    app.register_blueprint(work.bp)
+    app.register_blueprint(library.bp)
     app.register_blueprint(messenger_api.bp)  # 메신저(nexus-messenger) 토큰 인증 JSON API, /api/v1/*
     realtime.init_app(app)  # 메신저 실시간 전송(Socket.IO)
     app.config.setdefault("CHAT_RESPONDER", chat.placeholder_responder)  # 실제 AI 연결은 다른 담당이 이 값을 교체한다
@@ -50,6 +52,8 @@ def create_app(overrides=None):
     app.after_request(security.add_headers)
     app.teardown_request(db.close_dbs)
     app.jinja_env.globals["csrf_token"] = security.csrf_token
+
+    app.context_processor(permissions.can_context)   # 템플릿의 can('finance.view') 같은 권한 판정
 
     @app.context_processor
     def inject_pending_approvals():

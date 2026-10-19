@@ -20,7 +20,7 @@
     {% if g.user.role in ('manager', 'admin') %}<li><a href="{{ url_for('portal.confidential_list') }}">기밀 문서함</a></li>{% endif %}
     <li><a href="{{ url_for('portal.board_list', board='notice') }}">공지사항</a></li>
     <li><a href="{{ url_for('portal.board_list', board='free') }}">자유게시판</a></li>
-    <li><a href="{{ url_for('portal.employees') }}">직원 검색</a></li>
+    <li><a href="{{ url_for('library.contact_list') }}">주소록</a></li>
   </ul>
   <h2>인사</h2>
   <ul class="menu-list">

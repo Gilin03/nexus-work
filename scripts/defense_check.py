@@ -269,7 +269,7 @@ def d06(c):
 
     for s in SQLI:
         inspect(f"로그인 '{s[:14]}'", c.anon.login(s, s), (401,))
-        r = c.emp.get("/employees?" + urllib.parse.urlencode({"q": s}))
+        r = c.emp.get("/library/contacts?tab=company&" + urllib.parse.urlencode({"q": s}))
         inspect(f"직원검색 '{s[:14]}'", r, (200,))
         if "검색 결과가 없습니다" not in r.text:
             p.append(f"직원검색 '{s[:14]}': 결과가 비어 있지 않다(조건 우회 의심)")
@@ -297,7 +297,7 @@ def d07(c):
         c.emp.post("/approvals/new", {"title": s[:100], "body": s, "approver_1": str(c.db.uid(PROBE + "mgr"))}, token_from="/approvals/new")
     pages = ["/chat", "/boards/free", "/expenses", "/approvals"]
     html = "".join(c.emp.get(path).text for path in pages)
-    html += "".join(c.emp.get("/employees?" + urllib.parse.urlencode({"q": s})).text for s in XSS)
+    html += "".join(c.emp.get("/library/contacts?tab=company&" + urllib.parse.urlencode({"q": s})).text for s in XSS)
     post_id = re.search(r"/posts/(\d+)", c.emp.get("/boards/free").text)
     if post_id:
         html += c.emp.get(f"/posts/{post_id.group(1)}").text

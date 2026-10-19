@@ -83,3 +83,129 @@ def recent_counts(log_dir, hours=24, top=8):
             break                                    # 최신순이라 이 시각 이전은 더 볼 필요 없다
         counts[str(e.get("event_type", "-"))] += 1
     return counts.most_common(top)
+
+
+# =====================================================================================
+# 보안 대시보드: 기간별 요약·추이·상위 목록·필터링된 이벤트(표·CSV 내보내기)를 한 번 훑어서 만든다.
+# =====================================================================================
+PERIODS = (("24h", 24, "최근 24시간"), ("7d", 168, "최근 7일"), ("30d", 720, "최근 30일"))
+PAGE_SIZES = (50, 100, 200)
+MAX_MATCH = 2000                         # 필터에 맞는 이벤트는 최신순으로 이만큼까지만 모은다(표·내보내기 공통 상한)
+# 위협 지표: 이벤트 유형 → 화면 이름. 값이 클수록 공격·오용 가능성이 높은 신호다.
+THREAT_TYPES = (("login_failure", "로그인 실패"), ("login_locked", "잠긴 계정으로 로그인 시도"), ("account_locked", "계정 잠금 발생"),
+                ("rate_limited", "속도 제한 차단"), ("csrf_fail", "CSRF 차단"), ("suspicious_input", "의심 입력(SQLi·XSS 등)"),
+                ("upload_reject", "업로드 거부"), ("authz_deny", "권한 거부"))
+LOGIN_FAIL_TYPES = ("login_failure", "login_locked")
+BAD_DECISIONS = ("DENY", "BLOCK", "WARN", "ERROR")
+CLASS_OF = {"INFO": "ok", "ALLOW": "ok", "WARN": "warn", "ERROR": "warn", "DENY": "deny", "BLOCK": "block"}
+SERIES = (("ok", "정상(INFO·ALLOW)"), ("warn", "경고(WARN·ERROR)"), ("deny", "거부(DENY)"), ("block", "차단(BLOCK)"))
+CHART_W, CHART_H, CHART_PAD = 720, 170, 22
+
+
+def _parse_ts(value):
+    try:
+        t = datetime.fromisoformat(str(value))
+    except ValueError:
+        return None
+    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+
+
+def _slots(since, now, hourly):
+    """since~now 를 덮는 시간(또는 날짜) 칸의 키 목록(한국 시간 기준, 오래된 것부터)."""
+    step = timedelta(hours=1) if hourly else timedelta(days=1)
+    t = since.astimezone(KST).replace(minute=0, second=0, microsecond=0)
+    if not hourly:
+        t = t.replace(hour=0)
+    out, end = [], now.astimezone(KST)
+    while t <= end:
+        out.append(t)
+        t += step
+    return out
+
+
+def _slot_key(t, hourly):
+    t = t.astimezone(KST)
+    return t.strftime("%Y-%m-%d %H") if hourly else t.strftime("%Y-%m-%d")
+
+
+def scan(log_dir, hours=24, event_type="", decision="", user="", ip="", now=None):
+    """로그를 한 번 훑는다. 기간 안의 모든 이벤트로 요약·추이·상위 목록을 만들고, 필터에 맞는 이벤트는 최신순으로 MAX_MATCH 건까지 모은다."""
+    now = now or datetime.now(timezone.utc)
+    since = now - timedelta(hours=hours)
+    hourly = hours <= 48
+    slots = _slots(since, now, hourly)
+    buckets = {_slot_key(t, hourly): Counter() for t in slots}
+    decisions, kinds, bad_ips, fail_users, suspicious = Counter(), Counter(), Counter(), Counter(), Counter()
+    ips, matched, matched_n, scanned, oldest, reached_start = set(), [], 0, 0, None, False
+    for line in _lines_newest_first(log_dir):
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(e, dict):
+            continue
+        when = _parse_ts(e.get("ts", ""))
+        if when is None:
+            continue
+        if when < since:
+            reached_start = True
+            break                                         # 최신순이라 이 시각 이전은 더 볼 필요 없다
+        scanned += 1
+        oldest = when if oldest is None else min(oldest, when)
+        et, dec, src = str(e.get("event_type", "-")), str(e.get("decision", "-")), str(e.get("src_ip", "-"))
+        decisions[dec] += 1
+        kinds[et] += 1
+        ips.add(src)
+        cls = CLASS_OF.get(dec)
+        key = _slot_key(when, hourly)
+        if cls and key in buckets:
+            buckets[key][cls] += 1
+        if dec in BAD_DECISIONS:
+            bad_ips[src] += 1
+        if et in LOGIN_FAIL_TYPES:
+            fail_users[str(e.get("user", "-"))] += 1
+        if et == "suspicious_input":
+            suspicious[str(e.get("reason", "-"))] += 1
+        if event_type and et != event_type or decision and dec != decision or user and e.get("user") != user or ip and src != ip:
+            continue
+        matched_n += 1
+        if len(matched) < MAX_MATCH:
+            row = _shape(e)
+            row["raw"] = json.dumps(e, ensure_ascii=False, indent=1)[:1500]
+            matched.append(row)
+    return {"since": since, "now": now, "hourly": hourly, "slots": slots, "buckets": buckets, "decisions": decisions, "kinds": kinds,
+            "bad_ips": bad_ips, "fail_users": fail_users, "suspicious": suspicious, "distinct_ips": len(ips), "matched": matched,
+            "matched_n": matched_n, "scanned": scanned, "oldest": oldest, "reached_start": reached_start}
+
+
+def chart(result):
+    """추이 그래프용 SVG 좌표를 미리 계산한다(화면 템플릿은 숫자만 찍는다: 인라인 스타일·스크립트 없이 CSP 를 지킨다)."""
+    slots, buckets, hourly = result["slots"], result["buckets"], result["hourly"]
+    n = max(len(slots), 1)
+    peak = max((sum(buckets[_slot_key(t, hourly)].values()) for t in slots), default=0) or 1
+    plot_h = CHART_H - CHART_PAD
+    slot_w = CHART_W / n
+    bar_w = max(slot_w * 0.7, 1)
+    label_every = max(1, n // 12)
+    bars, labels = [], []
+    for i, t in enumerate(slots):
+        counts = buckets[_slot_key(t, hourly)]
+        x = round(i * slot_w + (slot_w - bar_w) / 2, 1)
+        y_bottom, rects = float(plot_h), []
+        for cls, _label in SERIES:
+            h = round(plot_h * counts[cls] / peak, 1)
+            if h > 0:
+                y_bottom -= h
+                rects.append({"cls": cls, "y": round(y_bottom, 1), "h": h})
+        local = t.astimezone(KST)
+        title = f"{local.strftime('%m-%d %H시' if hourly else '%Y-%m-%d')}: " + ", ".join(f"{lab.split('(')[0]} {counts[c]}" for c, lab in SERIES)
+        bars.append({"x": x, "w": round(bar_w, 1), "rects": rects, "title": title, "total": sum(counts.values())})
+        if i % label_every == 0:
+            labels.append({"x": round(x + bar_w / 2, 1), "text": local.strftime("%H시" if hourly else "%m-%d")})
+    return {"width": CHART_W, "height": CHART_H, "plot": plot_h, "bars": bars, "labels": labels, "peak": peak}
+
+
+def csv_cell(value):
+    """CSV 수식 주입(= + - @ 로 시작하는 칸이 엑셀에서 수식으로 실행되는 것)을 막는다: 앞에 작은따옴표를 붙인다."""
+    text = str(value)
+    return "'" + text if text[:1] in ("=", "+", "-", "@", "\t", "\r") else text

@@ -9,6 +9,8 @@ GRANT SELECT, INSERT         ON `__DB__`.users         TO 'nexus_app'@'%';
 GRANT UPDATE (password_hash, failed_count, locked_until, role, session_version) ON `__DB__`.users TO 'nexus_app'@'%';
 -- 직원: 조회와 등록(관리자 화면의 계정 등록이 인사카드를 함께 만든다)만. 수정·삭제는 불가(사번·입사일·연차 보호).
 GRANT SELECT, INSERT         ON `__DB__`.employees     TO 'nexus_app'@'%';
+-- 직급(승진·강등)은 관리자 화면에서 바꾼다. 다른 열(사번·입사일·연차·부서·이름)은 그대로 수정 불가.
+GRANT UPDATE (title)         ON `__DB__`.employees     TO 'nexus_app'@'%';
 GRANT SELECT                 ON `__DB__`.documents     TO 'nexus_app'@'%';
 GRANT SELECT, INSERT, DELETE ON `__DB__`.posts         TO 'nexus_app'@'%';
 GRANT SELECT, INSERT, DELETE ON `__DB__`.attachments   TO 'nexus_app'@'%';
@@ -35,6 +37,28 @@ GRANT SELECT, INSERT         ON `__DB__`.approval_files TO 'nexus_app'@'%';
 GRANT SELECT, INSERT         ON `__DB__`.expenditures      TO 'nexus_app'@'%';
 GRANT SELECT, INSERT         ON `__DB__`.expenditure_items TO 'nexus_app'@'%';
 GRANT UPDATE (status, reason, decided_at)       ON `__DB__`.approval_steps TO 'nexus_app'@'%';
+
+-- 업무·자료: 이력을 남기므로 DELETE 는 구성원 해제(project_members)에만 준다. 수정은 상태 전이에 필요한 열만.
+GRANT SELECT, INSERT         ON `__DB__`.projects        TO 'nexus_app'@'%';
+GRANT UPDATE (status)        ON `__DB__`.projects        TO 'nexus_app'@'%';
+GRANT SELECT, INSERT, DELETE ON `__DB__`.project_members TO 'nexus_app'@'%';
+GRANT SELECT, INSERT         ON `__DB__`.tasks           TO 'nexus_app'@'%';
+GRANT UPDATE (status, completed_at, assignee_id) ON `__DB__`.tasks TO 'nexus_app'@'%';
+GRANT SELECT, INSERT         ON `__DB__`.task_comments   TO 'nexus_app'@'%';
+GRANT SELECT, INSERT         ON `__DB__`.events          TO 'nexus_app'@'%';
+GRANT UPDATE (status)        ON `__DB__`.events          TO 'nexus_app'@'%';
+GRANT SELECT, INSERT         ON `__DB__`.event_attendees TO 'nexus_app'@'%';
+GRANT SELECT, INSERT         ON `__DB__`.resources       TO 'nexus_app'@'%';
+GRANT UPDATE (active)        ON `__DB__`.resources       TO 'nexus_app'@'%';
+GRANT SELECT, INSERT         ON `__DB__`.reservations    TO 'nexus_app'@'%';
+GRANT UPDATE (status)        ON `__DB__`.reservations    TO 'nexus_app'@'%';
+GRANT SELECT, INSERT         ON `__DB__`.lib_folders     TO 'nexus_app'@'%';
+GRANT SELECT, INSERT         ON `__DB__`.lib_files       TO 'nexus_app'@'%';
+GRANT UPDATE (deleted_at, deleted_by) ON `__DB__`.lib_files TO 'nexus_app'@'%';
+GRANT SELECT, INSERT         ON `__DB__`.lib_forms       TO 'nexus_app'@'%';
+GRANT UPDATE (deleted_at)    ON `__DB__`.lib_forms       TO 'nexus_app'@'%';
+GRANT SELECT, INSERT         ON `__DB__`.contacts        TO 'nexus_app'@'%';
+GRANT UPDATE (deleted_at)    ON `__DB__`.contacts        TO 'nexus_app'@'%';
 
 -- 메신저(nexus-messenger)용 표. 토큰은 발급·조회·폐기(revoked_at)만, 삭제는 없다(감사 흔적 유지).
 GRANT SELECT, INSERT              ON `__DB__`.api_tokens           TO 'nexus_app'@'%';

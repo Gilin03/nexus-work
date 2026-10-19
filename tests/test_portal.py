@@ -55,7 +55,7 @@ def count_posts(root, title):
 
 
 # ---------- 로그인 필수 ----------
-@pytest.mark.parametrize("path", ["/documents", "/documents/1", "/confidential", "/confidential/1", "/employees",
+@pytest.mark.parametrize("path", ["/documents", "/documents/1", "/confidential", "/confidential/1", "/library/contacts",
                                   "/boards/free", "/boards/notice", "/boards/free/new", "/posts/1", "/attachments/1",
                                   "/account/password"])
 def test_every_page_requires_login(aapp, path):
@@ -112,7 +112,7 @@ def test_confidential_content_never_leaks_through_general_paths(aapp, root):
     c = as_user(aapp, "zz_mgr")  # 기밀 권한이 있는 계정으로도 일반 경로에는 나오지 않아야 한다
     assert "zz_conf" not in c.get("/documents").get_data(as_text=True)
     assert "TOP-SECRET-BODY" not in c.get(f"/documents/{cid}").get_data(as_text=True)
-    assert "TOP-SECRET-BODY" not in c.get("/employees?q=zz_").get_data(as_text=True)
+    assert "TOP-SECRET-BODY" not in c.get("/library/contacts?tab=company&q=zz_").get_data(as_text=True)
 
 
 def test_nav_shows_confidential_link_only_to_privileged_roles(aapp):
@@ -121,25 +121,25 @@ def test_nav_shows_confidential_link_only_to_privileged_roles(aapp):
     assert "기밀 문서함" not in emp and "기밀 문서함" in mgr
 
 
-# ---------- 직원 검색 ----------
+# ---------- 직원 검색(주소록의 사내 직원 탭) ----------
 def test_employee_search_by_name_dept_and_title(aapp, root):
     add_employee(root, "zz_alpha", "영업팀", "사원")
     add_employee(root, "zzXalpha", "개발팀", "대리")
     add_employee(root, "zz_beta", "영업팀", "과장")
     c = as_user(aapp, "zz_emp")
-    html = c.get("/employees?q=zz_alpha").get_data(as_text=True)
+    html = c.get("/library/contacts?tab=company&q=zz_alpha").get_data(as_text=True)
     assert "zz_alpha" in html and "zzXalpha" not in html            # '_' 는 와일드카드가 아니라 문자 그대로
-    html = c.get("/employees?q=영업").get_data(as_text=True)
+    html = c.get("/library/contacts?tab=company&q=영업").get_data(as_text=True)
     assert "zz_alpha" in html and "zz_beta" in html and "zzXalpha" not in html
-    assert "zz_beta" in c.get("/employees?q=과장").get_data(as_text=True)
+    assert "zz_beta" in c.get("/library/contacts?tab=company&q=과장").get_data(as_text=True)
 
 
 def test_like_wildcards_are_literal(aapp, root):
     add_employee(root, "zz_one")
     add_employee(root, "zz_two")
     c = as_user(aapp, "zz_emp")
-    assert "검색 결과가 없습니다" in c.get("/employees?q=%25").get_data(as_text=True)      # q=%  → 전체 일치 아님
-    assert "검색 결과가 없습니다" in c.get("/employees?q=zz%25one").get_data(as_text=True)
+    assert "검색 결과가 없습니다" in c.get("/library/contacts?tab=company&q=%25").get_data(as_text=True)      # q=%  → 전체 일치 아님
+    assert "검색 결과가 없습니다" in c.get("/library/contacts?tab=company&q=zz%25one").get_data(as_text=True)
 
 
 def test_employee_search_sql_injection_returns_nothing(aapp, root):
@@ -147,24 +147,24 @@ def test_employee_search_sql_injection_returns_nothing(aapp, root):
     c = as_user(aapp, "zz_emp")
     short = ("' OR 1=1 -- ", "x' UNION SELECT username,2,3,4 FROM users-- ", "\\", "%' OR '%'='", "x') OR ('1'='1")
     for payload in short:  # 길이 한도(50자) 안의 페이로드는 검색어로만 취급되어 결과가 없다
-        r = c.get("/employees", query_string={"q": payload})
+        r = c.get("/library/contacts", query_string={"tab": "company", "q": payload})
         html = r.get_data(as_text=True)
         assert r.status_code == 200 and "zz_alpha" not in html and "argon2" not in html, payload
     long_payload = "zz' UNION SELECT username,password_hash,role,dept FROM users -- "
-    r = c.get("/employees", query_string={"q": long_payload})  # 50자를 넘으면 검증 단계에서 거부
+    r = c.get("/library/contacts", query_string={"tab": "company", "q": long_payload})  # 50자를 넘으면 검증 단계에서 거부
     assert r.status_code == 400 and "argon2" not in r.get_data(as_text=True)
 
 
 @pytest.mark.parametrize("q", ["a" * 51, "bad\x00char", "tab\tchar"])
 def test_employee_search_rejects_bad_queries_and_logs(aapp, events, q):
-    r = as_user(aapp, "zz_emp").get("/employees", query_string={"q": q})
+    r = as_user(aapp, "zz_emp").get("/library/contacts", query_string={"tab": "company", "q": q})
     assert r.status_code == 400
     ev = [e for e in events() if e["event_type"] == "input_rejected"][-1]
     assert ev["field"] == "q" and ev["decision"] == "DENY"
 
 
 def test_employee_search_echo_is_escaped(aapp):
-    html = as_user(aapp, "zz_emp").get("/employees", query_string={"q": '"><script>alert(1)</script>'}).get_data(as_text=True)
+    html = as_user(aapp, "zz_emp").get("/library/contacts", query_string={"tab": "company", "q": '"><script>alert(1)</script>'}).get_data(as_text=True)
     assert "<script" not in html
 
 
@@ -486,3 +486,14 @@ def test_unreadable_stored_file_is_a_clean_404_not_a_server_error(aapp, root, ev
     r = c.get(f"/attachments/{att_id}")
     assert r.status_code == 404 and b"Traceback" not in r.data
     assert any(e["event_type"] == "attachment_unreadable" and e["reason"] == "OSError" and e["errno"] == 22 for e in events())
+
+
+def test_old_employee_search_address_moves_to_the_address_book(aapp, root):
+    c = as_user(aapp, "zz_emp")
+    r = c.get("/employees?q=영업")
+    assert r.status_code == 301 and r.headers["Location"].endswith("/library/contacts?tab=company&q=%EC%98%81%EC%97%85")
+    assert c.get("/employees").headers["Location"].endswith("/library/contacts?tab=company")
+    anon = aapp.test_client().get("/employees")
+    assert anon.status_code == 303 and "/login" in anon.headers["Location"]
+    for entry in ("직원 검색",):
+        assert entry not in c.get("/").get_data(as_text=True)                                  # 메뉴에 따로 남아 있지 않다

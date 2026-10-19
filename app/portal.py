@@ -1,4 +1,4 @@
-"""포털: 문서함(일반/기밀), 직원 검색, 게시판·자유게시판, 첨부 업로드·다운로드.
+"""포털: 문서함(일반/기밀), 게시판·자유게시판, 첨부 업로드·다운로드.
 - 기밀 문서는 manager 이상만, 별도 DB 계정(conf=True)으로만 읽는다.
 - 모든 SQL 은 상수 문자열 + params. 화면 출력은 Jinja 자동 이스케이프를 그대로 쓰고 끄지 않는다.
 - 첨부는 확장자 허용목록 + 내용 확인 후 웹루트 밖에 무작위 이름으로 저장하고, 항상 첨부(다운로드)로만 내려준다."""
@@ -8,6 +8,7 @@ from flask import Blueprint, abort, current_app, g, redirect, render_template, r
 
 from . import db, uploads, validators
 from .auth import login_required, role_required
+from .permissions import can
 from .security import log_event
 
 bp = Blueprint("portal", __name__)
@@ -74,23 +75,12 @@ def confidential_document(doc_id):
     return render_template("document.html", doc=row, back=url_for("portal.confidential_list"), confidential=True)
 
 
-# ---------- 직원 검색 ----------
+# ---------- 직원 검색 → 주소록 ----------
+# 직원 검색은 주소록의 "사내 직원" 탭으로 합쳤다(같은 데이터·같은 공개 범위·같은 검색 규칙, app/library.py). 옛 주소와 북마크는 그대로 이동시킨다.
 @bp.get("/employees")
 @login_required
 def employees():
-    q = request.args.get("q", "").strip()
-    if not q:
-        rows = db.query_all("SELECT name, dept, title, ext FROM employees ORDER BY name LIMIT 50")
-        return render_template("employees.html", rows=rows, q="", error=None)
-    try:
-        pattern = validators.like_pattern(q)
-    except ValueError as exc:
-        log_event("input_rejected", "DENY", str(exc), field="q", value=q[:100])
-        return render_template("employees.html", rows=[], q="", error="검색어는 1~50자로 입력하세요(제어문자 사용 불가)."), 400
-    rows = db.query_all(
-        "SELECT name, dept, title, ext FROM employees "
-        "WHERE name LIKE %s OR dept LIKE %s OR title LIKE %s ORDER BY name LIMIT 50", (pattern, pattern, pattern))
-    return render_template("employees.html", rows=rows, q=q, error=None)
+    return redirect(url_for("library.contact_list", tab="company", q=request.args.get("q") or None), 301)
 
 
 # ---------- 게시판 ----------
@@ -105,14 +95,14 @@ def board_list(board):
         "ORDER BY p.id DESC LIMIT %s OFFSET %s", (board, PAGE_SIZE + 1, (page - 1) * PAGE_SIZE))
     return render_template("board.html", board=board, name=BOARDS[board], rows=rows[:PAGE_SIZE],
                            page=page, has_next=len(rows) > PAGE_SIZE,
-                           can_write=(board != "notice" or g.user["role"] in ("manager", "admin")))
+                           can_write=(board != "notice" or can(g.user, "notice.write")))
 
 
 @bp.route("/boards/<board>/new", methods=["GET", "POST"])
 @login_required
 def post_new(board):
     _board_or_404(board)
-    if board == "notice" and g.user["role"] not in ("manager", "admin"):
+    if board == "notice" and not can(g.user, "notice.write"):
         return _forbidden("insufficient_role", resource=f"board:{board}")
     if request.method == "GET":
         return render_template("post_form.html", board=board, name=BOARDS[board], error=None)

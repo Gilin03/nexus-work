@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}{{ f.name }} · 자료실 · NEXUS WORK{% endblock %}
+{% block content %}
+<p class="crumb"><a href="{{ url_for('library.library_home') }}">자료실</a>{% for x in path %} / {% if loop.last %}<strong>{{ x.name }}</strong>{% else %}<a href="{{ url_for('library.folder_view', folder_id=x.id) }}">{{ x.name }}</a>{% endif %}{% endfor %}</p>
+<h1>&#128193; {{ f.name }} <span class="hint">{{ '전사 공개' if f.scope == 'company' else f.dept ~ ' 공개' }}</span></h1>
+{% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+<div class="sheet">
+  <h2>하위 폴더</h2>
+  {% if subs %}
+  <ul class="plain">
+    {% for s in subs %}<li><a href="{{ url_for('library.folder_view', folder_id=s.id) }}">&#128193; {{ s.name }}</a> <span class="hint">폴더 {{ s.subs }} · 파일 {{ s.files }}</span></li>{% endfor %}
+  </ul>
+  {% else %}<p class="hint">하위 폴더가 없습니다.</p>{% endif %}
+  {% if can_create %}
+  <form method="post" action="{{ url_for('library.folder_new') }}" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="parent_id" value="{{ f.id }}">
+    <label>새 하위 폴더 <input name="name" required maxlength="50"></label>
+    <button type="submit" class="btn">만들기</button>
+  </form>
+  {% endif %}
+</div>
+<div class="sheet">
+  <h2>파일</h2>
+  {% if files %}
+  <div class="scroll">
+    <table>
+      <thead><tr><th>파일</th><th>버전</th><th class="num">크기</th><th>올린 사람</th><th>올린 날</th><th>설명</th><th></th></tr></thead>
+      <tbody>
+      {% for x in files %}
+        <tr{% if not x.latest %} class="old"{% endif %}>
+          <td><a href="{{ url_for('library.file_download', file_id=x.id) }}">{{ x.orig_name }}</a></td>
+          <td>v{{ x.version }}{% if x.latest %} <span class="flag">최신</span>{% endif %}</td>
+          <td class="num">{{ '{:,}'.format(x.size) }} B</td>
+          <td>{{ x.uploader }}</td>
+          <td class="num">{{ x.created_at.strftime('%Y-%m-%d') }}</td>
+          <td>{{ x.note }}</td>
+          <td>
+            {% if x.uploaded_by == me or is_admin %}
+            <form method="post" action="{{ url_for('library.file_delete', file_id=x.id) }}" class="inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn small">삭제</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}<p class="hint">파일이 없습니다.</p>{% endif %}
+</div>
+<div class="sheet narrow">
+  <h2>파일 올리기</h2>
+  <p class="hint">형식·개수·용량 제한이 없습니다. 같은 이름의 파일을 올리면 새 버전이 되고 이전 버전은 남습니다.</p>
+  <form method="post" action="{{ url_for('library.file_upload', folder_id=f.id) }}" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>파일 (여러 개 선택 가능) <input type="file" name="file" multiple required></label>
+    <label>설명 (선택) <input name="note" maxlength="200"></label>
+    <div class="actions"><button type="submit" class="btn primary">올리기</button></div>
+  </form>
+</div>
+{% endblock %}

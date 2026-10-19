@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}주소록 · NEXUS WORK{% endblock %}
+{% block content %}
+<h1>주소록</h1>
+{% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+<p class="actions"><a class="btn primary" href="{{ url_for('library.contact_new', shared='1' if tab == 'shared' else '') }}">연락처 추가</a></p>
+<nav class="tabs" aria-label="주소록">
+  <ul>
+    {% for key, label in tabs %}
+    <li><a href="{{ url_for('library.contact_list', tab=key, q=q or None) }}" class="{{ 'on' if key == tab else '' }}"{% if key == tab %} aria-current="true"{% endif %}>{{ label }}</a></li>
+    {% endfor %}
+  </ul>
+</nav>
+<form method="get" action="{{ url_for('library.contact_list') }}" class="search">
+  <input type="hidden" name="tab" value="{{ tab }}">
+  <input id="q" name="q" maxlength="50" value="{{ q }}" placeholder="{{ '이름·부서·직책·내선' if tab == 'company' else '이름·회사·직책·전화·이메일' }}" aria-label="검색어">
+  <button type="submit" class="btn">검색</button>
+</form>
+<div class="sheet">
+  {% if rows %}
+  <div class="scroll">
+    <table>
+      {% if tab == 'company' %}
+      <thead><tr><th>이름</th><th>부서</th><th>직급</th><th>내선</th><th>사번</th></tr></thead>
+      <tbody>{% for r in rows %}<tr><td>{{ r.name }}</td><td>{{ r.dept }}</td><td>{{ r.title }}</td><td class="num">{{ r.ext }}</td><td class="num">{{ r.emp_no or '' }}</td></tr>{% endfor %}</tbody>
+      {% else %}
+      <thead><tr><th>이름</th><th>회사·직책</th><th>전화</th><th>이메일</th><th>메모</th><th>등록</th><th></th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <td>{{ r.name }}</td>
+          <td>{{ r.company }}{% if r.title %} <span class="hint">{{ r.title }}</span>{% endif %}</td>
+          <td>{{ r.phone }}</td><td>{{ r.email }}</td><td>{{ r.memo }}</td><td>{{ r.owner }}</td>
+          <td>
+            {% if r.owner_id == me or is_admin %}
+            <form method="post" action="{{ url_for('library.contact_delete', contact_id=r.id) }}" class="inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn small">삭제</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+      {% endif %}
+    </table>
+  </div>
+  {% else %}
+  <p class="hint">{{ '검색 결과가 없습니다.' if q else '연락처가 없습니다.' }}</p>
+  {% endif %}
+</div>
+{% endblock %}

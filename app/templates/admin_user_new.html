@@ -22,6 +22,13 @@
         {% for r in roles %}<option value="{{ r }}"{% if values.get('role', 'employee') == r %} selected{% endif %}>{{ r }} ({{ titles[r] }})</option>{% endfor %}
       </select>
     </label>
+    <label>직급 (비우면 역할의 기본 직급)
+      <select name="title">
+        <option value="">기본</option>
+        {% for t in ranks %}<option value="{{ t }}"{% if values.get('title') == t %} selected{% endif %}>{{ t }}</option>{% endfor %}
+      </select>
+    </label>
+    <p class="hint">직급은 역할에 맞아야 합니다(직원=사원·대리·과장, 팀장=팀장, 관리자=관리자). 부서가 <strong>{{ security_team }}</strong>이면 선택한 역할과 상관없이 최상위 권한(관리자)으로 고정됩니다.</p>
     <div class="actions"><button type="submit" class="btn primary">등록</button></div>
   </form>
 </div>

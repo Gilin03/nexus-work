@@ -1,9 +1,79 @@
 {% extends "base.html" %}
-{% block title %}감사 로그 · NEXUS WORK{% endblock %}
+{% block title %}보안 대시보드 · NEXUS WORK{% endblock %}
 {% block content %}
-<h1>감사 로그</h1>
+<h1>보안 대시보드</h1>
 {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+<p class="hint">보안 이벤트 로그(시각은 한국 시간)를 기간별로 요약합니다. 보안관제팀과 시스템관리자만 볼 수 있고, 열람과 내보내기는 모두 기록됩니다. 비밀번호·토큰·대화 내용은 기록되지 않습니다.</p>
+{% if truncated %}<p class="notice" role="status">로그가 선택한 기간 전체를 덮지 않습니다(가장 오래된 기록: {{ covered }}). 보관 중인 로그 범위 안에서만 집계했습니다.</p>{% endif %}
+
+<nav class="tabs" aria-label="기간">
+  <ul>
+    {% for key, hours, label in periods %}
+    <li><a href="{{ url_for('admin.audit_log', period=key, type=f.type or None, decision=f.decision or None, user=f.user or None, ip=f.ip or None) }}" class="{{ 'on' if key == period else '' }}"{% if key == period %} aria-current="true"{% endif %}>{{ label }}</a></li>
+    {% endfor %}
+  </ul>
+</nav>
+
+<ul class="stat-grid" aria-label="요약">
+  <li class="sheet stat"><span class="stat-n">{{ summary.total }}</span><span class="stat-l">전체 이벤트</span></li>
+  <li class="sheet stat"><span class="stat-n">{{ summary.ok }}</span><span class="stat-l">정상 (INFO·ALLOW)</span></li>
+  <li class="sheet stat"><span class="stat-n">{{ summary.warn }}</span><span class="stat-l">경고 (WARN·ERROR)</span></li>
+  <li class="sheet stat stat-bad"><span class="stat-n">{{ summary.deny }}</span><span class="stat-l">거부 (DENY)</span></li>
+  <li class="sheet stat stat-bad"><span class="stat-n">{{ summary.block }}</span><span class="stat-l">차단 (BLOCK)</span></li>
+  <li class="sheet stat"><span class="stat-n">{{ summary.ips }}</span><span class="stat-l">출발지 IP 수</span></li>
+</ul>
+
+<div class="sheet">
+  <h2>위협 지표</h2>
+  <ul class="threats">
+    {% for label, key, n in threats %}
+    <li class="threat{{ ' hot' if n else '' }}"><a href="{{ url_for('admin.audit_log', period=period, type=key) }}"><span class="threat-n">{{ n }}</span> {{ label }}</a></li>
+    {% endfor %}
+  </ul>
+</div>
+
+<div class="sheet">
+  <h2>이벤트 추이 ({{ '시간별' if hourly else '일별' }})</h2>
+  <ul class="legend" aria-label="범례">
+    {% for cls, label in series %}<li><span class="swatch bar-{{ cls }}" aria-hidden="true"></span> {{ label }}</li>{% endfor %}
+  </ul>
+  <svg class="trend" viewBox="0 0 {{ chart.width }} {{ chart.height }}" role="img" aria-label="기간별 이벤트 수 추이 그래프(최대 {{ chart.peak }}건)">
+    <line class="axis" x1="0" y1="{{ chart.plot }}" x2="{{ chart.width }}" y2="{{ chart.plot }}"></line>
+    {% for b in chart.bars %}
+    <g>
+      <title>{{ b.title }}</title>
+      {% for r in b.rects %}<rect class="bar-{{ r.cls }}" x="{{ b.x }}" y="{{ r.y }}" width="{{ b.w }}" height="{{ r.h }}"></rect>{% endfor %}
+    </g>
+    {% endfor %}
+    {% for l in chart.labels %}<text class="tick" x="{{ l.x }}" y="{{ chart.height - 6 }}" text-anchor="middle">{{ l.text }}</text>{% endfor %}
+  </svg>
+</div>
+
+<div class="top-grid">
+  <div class="sheet">
+    <h2>이벤트 유형 TOP 10</h2>
+    {% if top_kinds %}<ol class="top">{% for k, n in top_kinds %}<li><a href="{{ url_for('admin.audit_log', period=period, type=k) }}">{{ k }}</a> <span class="top-n">{{ n }}</span></li>{% endfor %}</ol>{% else %}<p class="hint">기록이 없습니다.</p>{% endif %}
+  </div>
+  <div class="sheet">
+    <h2>의심 출발지 IP TOP 10 <span class="hint">(거부·차단·경고)</span></h2>
+    {% if top_ips %}<ol class="top">{% for k, n in top_ips %}<li><a href="{{ url_for('admin.audit_log', period=period, ip=k) }}">{{ k }}</a> <span class="top-n">{{ n }}</span></li>{% endfor %}</ol>{% else %}<p class="hint">없음</p>{% endif %}
+  </div>
+  <div class="sheet">
+    <h2>로그인 실패 계정 TOP 10</h2>
+    {% if top_fail_users %}<ol class="top">{% for k, n in top_fail_users %}<li>{% if k != '-' %}<a href="{{ url_for('admin.audit_log', period=period, user=k) }}">{{ k }}</a>{% else %}(아이디 없음){% endif %} <span class="top-n">{{ n }}</span></li>{% endfor %}</ol>{% else %}<p class="hint">없음</p>{% endif %}
+  </div>
+  <div class="sheet">
+    <h2>의심 입력 유형</h2>
+    {% if top_suspicious %}<ol class="top">{% for k, n in top_suspicious %}<li>{{ k }} <span class="top-n">{{ n }}</span></li>{% endfor %}</ol>{% else %}<p class="hint">없음</p>{% endif %}
+  </div>
+  <div class="sheet">
+    <h2>현재 잠긴 계정</h2>
+    {% if locked %}<ul class="plain">{% for u in locked %}<li>{{ u.username }} <span class="hint">{{ u.dept }} · {{ u.locked_until.strftime('%m-%d %H:%M') }}까지</span></li>{% endfor %}</ul>{% else %}<p class="hint">없음</p>{% endif %}
+  </div>
+</div>
+
 <form method="get" action="{{ url_for('admin.audit_log') }}" class="sheet audit-filter">
+  <input type="hidden" name="period" value="{{ period }}">
   <label>이벤트
     <select name="type">
       <option value="">전체</option>
@@ -26,9 +96,11 @@
     <select name="limit">{% for n in limits %}<option value="{{ n }}"{% if n == limit %} selected{% endif %}>{{ n }}건</option>{% endfor %}</select>
   </label>
   <button type="submit" class="btn primary">조회</button>
+  <a class="btn" href="{{ url_for('admin.audit_export', period=period, type=f.type or None, decision=f.decision or None, user=f.user or None, ip=f.ip or None) }}">CSV 내보내기</a>
 </form>
+
 <div class="sheet">
-  <p class="hint">보안 이벤트 로그(최신순, 시각은 한국 시간)에서 최근 {{ scanned }}건을 훑어 {{ events | length }}건을 보여 줍니다. 비밀번호·토큰·대화 내용은 기록되지 않습니다.</p>
+  <p class="hint">조건에 맞는 이벤트 {{ matched_n }}건{% if capped %}(최신 {{ 2000 }}건까지만 표시·내보내기){% endif %} 중 {{ events | length }}건을 보여 줍니다. 행의 "상세"를 열면 기록된 전체 내용이 보입니다.</p>
   {% if events %}
   <div class="scroll">
     <table class="audit">
@@ -44,12 +116,17 @@
           <td><span class="st {{ 'st-rejected' if e.decision in ('DENY', 'BLOCK') else 'st-draft' if e.decision in ('INFO', 'WARN') else 'st-approved' }}">{{ e.decision }}</span></td>
           <td>{{ e.reason }}</td>
           <td>{{ e.method }} {{ e.path }}</td>
-          <td class="reason">{{ e.extra }}</td>
+          <td class="reason">{{ e.extra }}<details><summary>상세</summary><pre class="raw">{{ e.raw }}</pre></details></td>
         </tr>
       {% endfor %}
       </tbody>
     </table>
   </div>
+  <p class="actions">
+    {% if has_prev %}<a class="btn" href="{{ url_for('admin.audit_log', period=period, type=f.type or None, decision=f.decision or None, user=f.user or None, ip=f.ip or None, limit=limit, page=page - 1) }}">&larr; 이전</a>{% endif %}
+    <span class="hint">{{ page }}쪽</span>
+    {% if has_next %}<a class="btn" href="{{ url_for('admin.audit_log', period=period, type=f.type or None, decision=f.decision or None, user=f.user or None, ip=f.ip or None, limit=limit, page=page + 1) }}">다음 &rarr;</a>{% endif %}
+  </p>
   {% else %}
   <p class="hint">조건에 맞는 이벤트가 없습니다.</p>
   {% endif %}

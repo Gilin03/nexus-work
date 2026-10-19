@@ -139,7 +139,7 @@ def test_overview_counts_follow_the_database(aapp, root):
 
 # ---------- 감사 로그 ----------
 def test_audit_log_lists_events_and_filters(aapp, root, events):
-    adm = as_user(aapp, "zz_adm")
+    adm = as_user(aapp, "zz_sec")
     as_user(aapp, "zz_emp").get("/confidential")                           # authz_deny 한 건
     bad = aapp.test_client()
     login(bad, "zz_emp3", "틀린-비밀번호-1!")                                   # login_failure 한 건
@@ -156,14 +156,14 @@ def test_audit_log_lists_events_and_filters(aapp, root, events):
 
 def test_audit_log_escapes_attacker_controlled_values(aapp):
     as_user(aapp, "zz_emp").get("/<script>alert(1)</script>")
-    html = as_user(aapp, "zz_adm").get("/admin/audit?type=not_found").get_data(as_text=True)
+    html = as_user(aapp, "zz_sec").get("/admin/audit?type=not_found").get_data(as_text=True)
     assert "<script>alert(1)" not in html and "&lt;script&gt;" in html
 
 
 @pytest.mark.parametrize("query", ["type=Bad-Type", "type=" + "a" * 50, "decision=EVIL", "user=a b", "user=" + "u" * 40,
-                                   "ip=1.2.3.4;drop", "ip=" + "1" * 60, "limit=7", "limit=abc"])
+                                   "ip=1.2.3.4;drop", "ip=" + "1" * 60, "limit=7", "limit=abc", "period=1y", "page=0", "page=999", "page=x"])
 def test_audit_filters_reject_bad_values(aapp, query):
-    r = as_user(aapp, "zz_adm").get("/admin/audit?" + query)
+    r = as_user(aapp, "zz_sec").get("/admin/audit?" + query)
     assert r.status_code == 400 and "검색 조건이 올바르지 않습니다" in r.get_data(as_text=True)
 
 
@@ -194,7 +194,7 @@ def test_audit_reader_caps_how_much_it_reads(tmp_path, monkeypatch):
 # ---------- 권한 현황 ----------
 def test_permission_table_matches_what_the_server_enforces(aapp, root):
     html = as_user(aapp, "zz_adm").get("/admin/permissions").get_data(as_text=True)
-    for name in ("기밀 문서함", "재무 보고", "휴가 승인·반려", "관리(현황·사용자·감사 로그·권한)"):
+    for name in ("기밀 문서함", "재무 보고", "휴가 승인·반려", "관리(현황·사용자·권한)", "보안 대시보드·감사 로그"):
         assert name in html
     emp, mgr, adm = as_user(aapp, "zz_emp"), as_user(aapp, "zz_mgr"), as_user(aapp, "zz_adm")
     for path in ("/confidential", "/finance", "/admin/overview"):                  # 표가 '불가'라고 한 것은 실제로 403
@@ -207,10 +207,14 @@ def test_permission_table_matches_what_the_server_enforces(aapp, root):
 
 # ---------- 메뉴 ----------
 def test_admin_menu_group_has_four_items_for_admins_only(aapp):
-    adm = as_user(aapp, "zz_adm").get("/admin/overview").get_data(as_text=True)
-    for label in ("관리 현황", "사용자 관리", "감사 로그", "권한 현황"):
+    sec = as_user(aapp, "zz_sec").get("/admin/overview").get_data(as_text=True)
+    for label in ("관리 현황", "사용자 관리", "보안 대시보드", "권한 현황"):                    # 보안관제팀은 네 항목 모두
+        assert f">{label}</a>" in sec
+    assert 'aria-current="page">관리 현황</a>' in sec
+    adm = as_user(aapp, "zz_adm").get("/admin/overview").get_data(as_text=True)              # 일반 관리자는 보안 대시보드가 메뉴에 없다
+    for label in ("관리 현황", "사용자 관리", "권한 현황"):
         assert f">{label}</a>" in adm
-    assert 'aria-current="page">관리 현황</a>' in adm
+    assert ">보안 대시보드</a>" not in adm
     for who in ("zz_emp", "zz_mgr"):
         html = as_user(aapp, who).get("/").get_data(as_text=True)
-        assert "<h2>관리</h2>" not in html and "감사 로그" not in html and "권한 현황" not in html
+        assert "<h2>관리</h2>" not in html and "보안 대시보드" not in html and "권한 현황" not in html

@@ -315,6 +315,23 @@ def test_concurrent_approvals_only_one_wins(aapp, root):
     assert leave_rows(root, ZZ)[0][3] in ("approved", "rejected")
 
 
+def test_simultaneous_overlapping_leave_requests_only_one_is_stored(aapp, root):
+    """같은 사람이 같은 기간으로 동시에 두 번 신청해도 한 건만 들어간다(요청 앞부분의 읽기로 잡힌 스냅샷이 겹침 검사를 속이지 않아야 한다)."""
+    import threading
+    clients = [as_user(aapp, ZZ) for _ in range(4)]
+    gate, codes = threading.Barrier(len(clients)), []
+
+    def go(c):
+        gate.wait()
+        codes.append(apply(c, "annual", monday(3), None, reason="동시 신청").status_code)
+
+    ts = [threading.Thread(target=go, args=(c,)) for c in clients]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    assert sorted(codes) == [303, 409, 409, 409]
+    assert len(leave_rows(root, ZZ)) == 1
+
+
 def test_menu_lists_all_hr_items_and_marks_current_page(aapp):
     html = as_user(aapp, ZZ).get("/hr/org").get_data(as_text=True)
     for label in ("인사카드", "조직도", "근태관리", "휴가관리", "급여"):

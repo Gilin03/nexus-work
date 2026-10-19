@@ -43,7 +43,7 @@ def test_every_admin_route_requires_admin(aapp, root):
     assert {r.rule for r in rules} == {
         "/admin/users", "/admin/users/new", "/admin/users/<int:user_id>/role", "/admin/users/<int:user_id>/unlock",
         "/admin/users/<int:user_id>/lock", "/admin/users/<int:user_id>/reset-password", "/admin/overview", "/admin/audit",
-        "/admin/permissions"}
+        "/admin/audit/export.csv", "/admin/users/<int:user_id>/title", "/admin/permissions"}
     before = snapshot(root)
     anon, emp, mgr = aapp.test_client(), as_user(aapp, "zz_emp"), as_user(aapp, "zz_mgr")
     for rule in rules:

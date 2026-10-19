@@ -4,25 +4,40 @@
 <h1>사용자 관리</h1>
 <p><a class="btn primary" href="{{ url_for('admin.user_new') }}">사용자 등록</a></p>
 <div class="sheet">
-  <p class="hint">역할 변경은 즉시 적용됩니다. 본인 계정은 역할 변경·비밀번호 초기화·잠금을 할 수 없습니다. 비밀번호 초기화는 임시 비밀번호를 한 번만 보여 주며, 그 사용자의 로그인 상태를 모두 끊고 잠금도 풀어 줍니다.</p>
+  <p class="hint">역할·직급 변경은 즉시 적용됩니다. 본인 계정은 역할·직급 변경, 비밀번호 초기화, 잠금을 할 수 없습니다. <strong>고정</strong> 표시가 있는 계정(보안관제팀 소속·시스템관리자)은 항상 관리자 역할이며 역할 변경·잠금·비밀번호 초기화를 할 수 없습니다. 비밀번호 초기화는 임시 비밀번호를 한 번만 보여 주며, 그 사용자의 로그인 상태를 모두 끊고 잠금도 풀어 줍니다.</p>
   <div class="scroll">
   <table>
-    <thead><tr><th>아이디</th><th>이름</th><th>부서</th><th>역할</th><th>상태</th><th></th></tr></thead>
+    <thead><tr><th>아이디</th><th>이름</th><th>부서</th><th>역할</th><th>직급</th><th>상태</th><th></th></tr></thead>
     <tbody>
     {% for u in rows %}
       <tr>
-        <td>{{ u.username }}</td>
+        <td>{{ u.username }}{% if u.pinned %} <span class="pin" title="최상위 권한 고정 계정">고정</span>{% endif %}</td>
         <td>{{ u.display_name }}</td>
         <td>{{ u.dept }}</td>
         <td>
           {% if u.id == g.user.id %}
             {{ u.role }} (본인)
+          {% elif u.pinned %}
+            {{ u.role }}
           {% else %}
           <form method="post" action="{{ url_for('admin.change_role', user_id=u.id) }}" class="inline">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="current_role" value="{{ u.role }}">
             <select name="role" aria-label="{{ u.username }} 역할">
               {% for r in roles %}<option value="{{ r }}"{% if r == u.role %} selected{% endif %}>{{ r }}</option>{% endfor %}
+            </select>
+            <button type="submit">변경</button>
+          </form>
+          {% endif %}
+        </td>
+        <td>
+          {% if u.id == g.user.id or u.pinned or not u.title %}
+            {{ u.title or '-' }}
+          {% else %}
+          <form method="post" action="{{ url_for('admin.change_title', user_id=u.id) }}" class="inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <select name="title" aria-label="{{ u.username }} 직급">
+              {% for t in titles[u.role] %}<option value="{{ t }}"{% if t == u.title %} selected{% endif %}>{{ t }}</option>{% endfor %}
             </select>
             <button type="submit">변경</button>
           </form>
@@ -36,7 +51,7 @@
             <button type="submit">잠금 해제</button>
           </form>
           {% endif %}
-          {% if u.id != g.user.id %}
+          {% if u.id != g.user.id and not u.pinned %}
           {% if not u.is_locked %}
           <form method="post" action="{{ url_for('admin.lock', user_id=u.id) }}" class="inline">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

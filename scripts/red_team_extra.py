@@ -90,7 +90,7 @@ def e01(c):
         if not body or CANARY not in body.group(1):
             p.append("게시글 본문: {{7*7}} 원문이 그대로 보이지 않음(평가됐을 가능성)")
     if r2.status == 303:
-        body = re.search(r'<div class="body">(.*?)</div>', c.emp.get(r2.location).text, re.S)
+        body = re.search(r'<div class="body[^"]*">(.*?)</div>', c.emp.get(r2.location).text, re.S)
         if not body or CANARY not in body.group(1):
             p.append("결재 본문: {{7*7}} 원문이 그대로 보이지 않음(평가됐을 가능성)")
     chat_html = c.emp.get("/chat").text

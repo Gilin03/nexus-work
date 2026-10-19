@@ -41,7 +41,9 @@ def run(con, sql):
 
 APP_ALLOWED = [f"SELECT COUNT(*) FROM {t}" for t in (
     "users", "employees", "documents", "posts", "attachments", "chat_messages", "expenses", "approvals",
-    "approval_steps", "profile_photos", "attendance", "leave_requests", "approval_cc", "approval_files", "expenditures", "expenditure_items")]
+    "approval_steps", "profile_photos", "attendance", "leave_requests", "approval_cc", "approval_files", "expenditures", "expenditure_items",
+    "projects", "project_members", "tasks", "task_comments", "events", "event_attendees", "resources", "reservations",
+    "lib_folders", "lib_files", "lib_forms", "contacts")]
 APP_DENIED = [
     # 지출결의서: 상신한 뒤에는 금액·내역을 바꾸거나 지울 수 없다
     "UPDATE expenditures SET total_amount=1",
@@ -57,6 +59,43 @@ APP_DENIED = [
     "DELETE FROM approval_cc",
     "UPDATE approval_files SET orig_name='x'",
     "DELETE FROM approval_files",
+    # 업무·자료: 이력은 지울 수 없고(구성원 해제만 예외), 수정은 상태·숨김 열만 허용한다
+    "DELETE FROM projects",
+    "UPDATE projects SET owner_id=1",
+    "UPDATE projects SET name='x'",
+    "DELETE FROM tasks",
+    "UPDATE tasks SET title='x'",
+    "UPDATE tasks SET creator_id=1",
+    "UPDATE tasks SET due_date=NOW()",
+    "DELETE FROM task_comments",
+    "UPDATE task_comments SET body='x'",
+    "DELETE FROM events",
+    "UPDATE events SET title='x'",
+    "UPDATE events SET owner_id=1",
+    "UPDATE events SET start_at=NOW()",
+    "DELETE FROM event_attendees",
+    "UPDATE event_attendees SET user_id=1",
+    "DELETE FROM resources",
+    "UPDATE resources SET name='x'",
+    "DELETE FROM reservations",
+    "UPDATE reservations SET user_id=1",
+    "UPDATE reservations SET start_at=NOW()",
+    "UPDATE reservations SET end_at=NOW()",
+    "UPDATE reservations SET resource_id=1",
+    "DELETE FROM lib_folders",
+    "UPDATE lib_folders SET name='x'",
+    "UPDATE lib_folders SET scope='company'",
+    "DELETE FROM lib_files",
+    "UPDATE lib_files SET stored_name='x'",
+    "UPDATE lib_files SET orig_name='x'",
+    "UPDATE lib_files SET uploaded_by=1",
+    "DELETE FROM lib_forms",
+    "UPDATE lib_forms SET title='x'",
+    "UPDATE lib_forms SET stored_name='x'",
+    "DELETE FROM contacts",
+    "UPDATE contacts SET name='x'",
+    "UPDATE contacts SET owner_id=1",
+    "UPDATE contacts SET shared=1",
     # 근태: 퇴근 시각 외에는 수정할 수 없고 지울 수 없다(이력 유지)
     "UPDATE attendance SET check_in=NOW()",
     "UPDATE attendance SET user_id=1",
@@ -69,6 +108,11 @@ APP_DENIED = [
     "DELETE FROM leave_requests",
     # 직원 마스터(사번·입사일·연차)는 앱 계정이 바꿀 수 없다
     "UPDATE employees SET annual_days=99",
+    # 고정 계정 표시와 부서는 앱 계정이 바꿀 수 없다(직급 title 만 수정 가능)
+    "UPDATE users SET pinned=0",
+    "UPDATE users SET pinned=1",
+    "UPDATE employees SET dept='보안관제팀'",
+    "UPDATE employees SET emp_no='x'",
     "UPDATE employees SET hire_date=NOW()",
     "UPDATE profile_photos SET mime='x'",
     "SELECT COUNT(*) FROM confidential_documents",
@@ -115,6 +159,16 @@ def test_app_allowed(app, sql):
 
 
 APP_ALLOWED_WRITES = [  # 해당 열은 수정할 수 있어야 한다(WHERE id=0 이라 실제 행은 바뀌지 않는다)
+    "UPDATE projects SET status='done' WHERE id=0",
+    "DELETE FROM project_members WHERE project_id=0",
+    "UPDATE tasks SET status='done', completed_at=NOW(), assignee_id=1 WHERE id=0",
+    "UPDATE events SET status='cancelled' WHERE id=0",
+    "UPDATE resources SET active=0 WHERE id=0",
+    "UPDATE reservations SET status='cancelled' WHERE id=0",
+    "UPDATE lib_files SET deleted_at=NOW(), deleted_by=1 WHERE id=0",
+    "UPDATE lib_forms SET deleted_at=NOW() WHERE id=0",
+    "UPDATE contacts SET deleted_at=NOW() WHERE id=0",
+    "UPDATE employees SET title='사원' WHERE id=0",
     "UPDATE attendance SET check_out=NOW() WHERE id=0",
     "UPDATE leave_requests SET status='approved', decided_by=1, decided_at=NOW(), decision_reason='x' WHERE id=0",
     "UPDATE users SET password_hash='x' WHERE id=0",

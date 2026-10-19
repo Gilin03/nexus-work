@@ -13,6 +13,7 @@ from flask import Blueprint, abort, g, redirect, render_template, request, url_f
 from . import db, validators
 from .approvals import conflict, forbidden
 from .auth import login_required
+from .permissions import can
 from .security import log_event
 
 bp = Blueprint("hr", __name__, url_prefix="/hr")
@@ -54,6 +55,13 @@ def _scope():
     return (u["role"], u["id"], u["role"], u["dept"])
 
 
+def _card_scope():
+    """인사카드 범위: 전사 인사카드 권한(관리자, 경영지원·인사팀 과장 이상)이면 전체, 아니면 _scope() 와 같다."""
+    u = g.user
+    role = "admin" if can(u, "hr.cards.all") else u["role"]
+    return (role, u["id"], role, u["dept"])
+
+
 def _can_access(owner_id, owner_dept):
     u = g.user
     return u["role"] == "admin" or u["id"] == owner_id or (u["role"] == "manager" and u["dept"] == owner_dept)
@@ -80,7 +88,7 @@ def leave_balance(user_id, year):
 def card_list():
     rows = db.query_all("SELECT id, emp_no, name, dept, title, ext, hire_date FROM employees "
                         "WHERE (%s = 'admin' OR user_id = %s OR (%s = 'manager' AND dept = %s)) "
-                        "ORDER BY dept, name LIMIT 200", _scope())
+                        "ORDER BY dept, name LIMIT 200", _card_scope())
     return render_template("hr_cards.html", rows=rows)
 
 
@@ -91,7 +99,7 @@ def card_detail(emp_id):
                      (emp_id,))
     if not e:
         abort(404)
-    if not _can_access(e["user_id"], e["dept"]):
+    if not (can(g.user, "hr.cards.all") or _can_access(e["user_id"], e["dept"])):
         return forbidden("out_of_scope", resource=f"hr_card:{emp_id}")
     tenure = None
     if e["hire_date"]:
@@ -249,6 +257,9 @@ def leave_new():
         return _leave_form(error=LEAVE_MESSAGES[key], status=400, values=values)
 
     # 같은 사용자의 신청을 한 줄로 세워 잔여·중복 검사와 입력 사이에 다른 신청이 끼어들지 못하게 한다.
+    # 요청 앞부분(로그인 확인)의 일반 읽기로 이미 스냅샷이 잡혀 있으므로, 잠그기 전에 그 읽기 트랜잭션을 끝낸다
+    # (여기까지 쓴 것이 없다). 그렇지 않으면 잠금을 얻은 뒤에도 먼저 끝난 다른 신청이 겹침·잔여 검사에 보이지 않는다.
+    db.commit()
     db.query_one("SELECT id FROM users WHERE id = %s FOR UPDATE", (g.user["id"],))
     overlap = db.query_one("SELECT id FROM leave_requests WHERE user_id = %s AND status IN ('pending', 'approved') "
                            "AND start_date <= %s AND end_date >= %s LIMIT 1", (g.user["id"], end, start))

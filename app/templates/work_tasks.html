@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}업무 관리 · NEXUS WORK{% endblock %}
+{% block content %}
+<h1>업무 관리</h1>
+<p class="actions"><a class="btn primary" href="{{ url_for('work.task_new') }}">업무 등록·요청</a></p>
+<nav class="tabs" aria-label="업무함">
+  <ul>
+    {% for key, label in boxes %}
+    <li><a href="{{ url_for('work.task_list', box=key, state=state) }}" class="{{ 'on' if key == box else '' }}"{% if key == box %} aria-current="true"{% endif %}>{{ label }}{% if key in counts %} <span class="count">{{ counts[key] }}</span>{% endif %}</a></li>
+    {% endfor %}
+  </ul>
+</nav>
+<p class="filters" aria-label="상태 필터">
+  {% for key, label in states %}<a class="chip{{ ' on' if key == state else '' }}" href="{{ url_for('work.task_list', box=box, state=key) }}">{{ label }}</a>{% endfor %}
+</p>
+<div class="sheet">
+  {% if rows %}
+  <div class="scroll">
+    <table>
+      <thead><tr><th>제목</th><th>프로젝트</th><th>{{ '담당자' if box != 'mine' else '요청자' }}</th><th>우선순위</th><th>마감</th><th>상태</th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <td><a href="{{ url_for('work.task_detail', task_id=r.id) }}">{{ r.title }}</a></td>
+          <td>{% if r.project %}<a href="{{ url_for('work.project_detail', project_id=r.project_id) }}">{{ r.project }}</a>{% endif %}</td>
+          <td>{{ r.assignee if box != 'mine' else r.creator }}</td>
+          <td><span class="prio prio-{{ r.priority }}">{{ priorities[r.priority] }}</span></td>
+          <td class="num">{% if r.due_date %}{{ r.due_date.strftime('%Y-%m-%d') }}{% if r.overdue %} <span class="flag">지연</span>{% endif %}{% endif %}</td>
+          <td><span class="tk tk-{{ r.status }}">{{ statuses[r.status] }}</span></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="hint">해당하는 업무가 없습니다.</p>
+  {% endif %}
+</div>
+{% endblock %}

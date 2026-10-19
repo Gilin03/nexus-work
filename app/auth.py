@@ -53,14 +53,16 @@ def load_user():
         session.clear()
         return
     row = db.query_one(
-        "SELECT id, username, role, display_name, dept, session_version, "
+        "SELECT id, username, role, display_name, dept, session_version, pinned, "
+        "(SELECT e.title FROM employees e WHERE e.user_id = users.id) AS title, "
         "(locked_until IS NOT NULL AND locked_until > NOW()) AS is_locked, "
         "EXISTS(SELECT 1 FROM profile_photos p WHERE p.user_id = users.id) AS has_photo FROM users WHERE id = %s", (uid,))
     if not row or row["is_locked"] or session.get("sv") != row["session_version"]:
         # 삭제됐거나 잠긴 계정, 로그아웃·비밀번호 변경으로 무효가 된 쿠키는 즉시 세션 무효화
         session.clear()
         return
-    g.user = {k: row[k] for k in ("id", "username", "role", "display_name", "dept")}
+    g.user = {k: row[k] for k in ("id", "username", "role", "display_name", "dept", "title")}
+    g.user["pinned"] = bool(row["pinned"])
     g.user["has_photo"] = bool(row["has_photo"])
 
 

@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}문서 검색 · NEXUS WORK{% endblock %}
+{% block content %}
+<h1>문서 검색</h1>
+{% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+<form method="get" action="{{ url_for('library.search') }}" class="search">
+  <input id="q" name="q" maxlength="50" value="{{ q }}" placeholder="제목·내용·파일 이름으로 검색" aria-label="검색어" autofocus>
+  <button type="submit" class="btn primary">검색</button>
+</form>
+<p class="hint">문서함, 게시판, 내가 볼 수 있는 결재, 자료실 파일 이름, 양식, 내 업무, 주소록을 한 번에 찾습니다. 기밀 문서함은 검색하지 않습니다.</p>
+{% if groups is not none %}
+<div class="sheet">
+  {% if groups %}
+  <p><strong>{{ total }}건</strong>이 검색되었습니다 (분류별 최대 15건).</p>
+  {% for grp in groups %}
+  <h2>{{ grp.label }} ({{ grp['items']|length }})</h2>
+  <ul class="plain">
+    {% for it in grp['items'] %}<li><a href="{{ it.href }}">{{ it.title }}</a>{% if it.meta %} <span class="hint">{{ it.meta }}</span>{% endif %}</li>{% endfor %}
+  </ul>
+  {% endfor %}
+  {% else %}
+  <p class="hint">검색 결과가 없습니다.</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

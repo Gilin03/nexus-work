@@ -76,21 +76,31 @@ def data(root):
     d["rej"] = ins(root, "INSERT INTO approvals(title,body,requester_id,status,decided_at) VALUES('zz_반려문서','본문',%s,'rejected',NOW())", (u("zz_emp"),))
     ins(root, "INSERT INTO approval_steps(approval_id,step_no,approver_id,status,reason,decided_at) VALUES(%s,1,%s,'rejected','증빙 부족',NOW())", (d["rej"], u("zz_mgr")))
     ins(root, "INSERT INTO approval_steps(approval_id,step_no,approver_id,status) VALUES(%s,2,%s,'skipped')", (d["rej"], u("zz_adm")))
+    # 업무·자료
+    d["task"] = ins(root, "INSERT INTO tasks(title,creator_id,assignee_id) VALUES('zz_업무',%s,%s)", (u("zz_emp"), u("zz_emp")))
+    d["project"] = ins(root, "INSERT INTO projects(name,owner_id) VALUES('zz_프로젝트',%s)", (u("zz_mgr"),))
+    d["event"] = ins(root, "INSERT INTO events(owner_id,title,start_at,end_at,scope) VALUES(%s,'zz_일정',NOW(),NOW(),'company')", (u("zz_emp"),))
+    d["resource"] = ins(root, "INSERT INTO resources(name,kind) VALUES('zz_회의실','room')")
+    d["folder"] = ins(root, "INSERT INTO lib_folders(name,scope,created_by) VALUES('zz_폴더','company',%s)", (u("zz_adm"),))
     return d
 
 
 def pages(d):
-    return ["/", "/chat", "/documents", f"/documents/{d['doc']}", "/confidential", f"/confidential/{d['conf']}", "/employees",
+    return ["/", "/chat", "/documents", f"/documents/{d['doc']}", "/confidential", f"/confidential/{d['conf']}",
             "/boards/free", "/boards/notice", "/boards/free/new", f"/posts/{d['post']}", "/expenses", "/expenses/new",
             f"/expenses/{d['exp']}", "/approvals", "/approvals/new", f"/approvals/{d['ap']}", f"/approvals/{d['rej']}",
             "/payroll", f"/payroll/{d['pay']}", "/finance", f"/finance/{d['report']}", "/admin/users", "/account/password",
             "/account/photo", "/hr/cards", "/hr/org", "/hr/attendance", "/hr/leave", "/hr/leave/new",
-            "/admin/overview", "/admin/audit", "/admin/permissions", "/admin/users/new", "/approvals/new?type=expenditure"]
+            "/admin/overview", "/admin/audit", "/admin/audit?period=7d", "/admin/audit?period=30d", "/admin/permissions", "/admin/users/new", "/approvals/new?type=expenditure",
+            "/work/tasks", "/work/tasks?box=team", "/work/tasks/new", f"/work/tasks/{d['task']}", "/work/calendar", "/work/events/new",
+            f"/work/events/{d['event']}", "/work/reservations", f"/work/reservations/new?resource_id={d['resource']}", "/work/projects",
+            "/work/projects/new", f"/work/projects/{d['project']}", "/library", f"/library/folders/{d['folder']}", "/library/contacts",
+            "/library/contacts?tab=shared", "/library/contacts/new", "/library/search", "/library/search?q=zz", "/library/forms"]
 
 
 # ---------- 모든 화면 공통 ----------
 def test_every_page_is_csp_safe_and_accessible(aapp, data):
-    c = as_user(aapp, "zz_adm")
+    c = as_user(aapp, "zz_sec")                     # 보안관제팀(고정 관리자): 보안 대시보드까지 모든 화면을 연다
     for path in pages(data):
         r = c.get(path)
         assert r.status_code == 200, path
@@ -122,7 +132,9 @@ def test_navigation_marks_the_current_section(aapp, data):
     c = as_user(aapp, "zz_adm")
     for path, label in (("/chat", "AI 어시스턴트"), ("/approvals", "전자결재"), ("/expenses", "경비"), ("/documents", "문서함"), ("/payroll", "급여"),
                         ("/admin/users", "사용자 관리"), ("/boards/free", "자유게시판"), ("/boards/notice", "공지사항"),
-                        ("/employees", "직원 검색"), ("/finance", "재무 보고"), ("/confidential", "기밀 문서함")):
+                        ("/finance", "재무 보고"), ("/confidential", "기밀 문서함"),
+                        ("/work/tasks", "업무 관리"), ("/work/calendar", "일정"), ("/work/reservations", "예약"), ("/work/projects", "프로젝트"),
+                        ("/library", "자료실"), ("/library/search", "문서 검색"), ("/library/forms", "양식 모음"), ("/library/contacts", "주소록")):
         html = c.get(path).get_data(as_text=True)
         assert re.search(rf'<a href="[^"]+" aria-current="page">{label}</a>', html), path
 
@@ -165,7 +177,7 @@ def test_approval_state_is_never_conveyed_by_color_alone(aapp, data):
 @pytest.mark.parametrize("path_key,expected", [
     ("/confidential", True), ("/confidential/{conf}", True), ("/payroll", True), ("/payroll/{pay}", True),
     ("/finance", True), ("/finance/{report}", True),
-    ("/documents", False), ("/documents/{doc}", False), ("/employees", False), ("/boards/free", False),
+    ("/documents", False), ("/documents/{doc}", False), ("/library/contacts", False), ("/boards/free", False),
     ("/expenses", False), ("/approvals", False),
 ])
 def test_confidential_stamp_only_on_confidential_pages(aapp, data, path_key, expected):
