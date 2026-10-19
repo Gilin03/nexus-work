@@ -1,7 +1,7 @@
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, g, jsonify, render_template, request
 from werkzeug.exceptions import HTTPException
 
-from . import admin, approvals, auth, chat, db, erp, messenger_api, portal, realtime, security
+from . import admin, approvals, auth, chat, db, erp, formats, hr, messenger_api, portal, profile, realtime, security
 from .config import Config
 
 ERROR_TEXT = {
@@ -34,11 +34,15 @@ def create_app(overrides=None):
     app.register_blueprint(approvals.bp)
     app.register_blueprint(admin.bp)
     app.register_blueprint(chat.bp)
+    app.register_blueprint(profile.bp)
+    app.register_blueprint(hr.bp)
     app.register_blueprint(messenger_api.bp)  # 메신저(nexus-messenger) 토큰 인증 JSON API, /api/v1/*
     realtime.init_app(app)  # 메신저 실시간 전송(Socket.IO)
     app.config.setdefault("CHAT_RESPONDER", chat.placeholder_responder)  # 실제 AI 연결은 다른 담당이 이 값을 교체한다
     app.jinja_env.filters["won"] = lambda n: f"{int(n):,}원"
+    app.jinja_env.filters["hangul_won"] = formats.won_hangul
     app.jinja_env.filters["status_label"] = lambda s: STATUS_LABEL.get(s, s)
+    app.before_request(security.apply_upload_limit)  # 본문을 읽기 전에(CSRF 검사가 폼을 읽는다) 첨부 요청의 상한을 푼다
     app.before_request(auth.load_user)  # CSRF 실패 로그에도 사용자명이 남도록 먼저 실행(세션 쿠키가 있을 때만 DB 조회)
     app.before_request(security.scan_inputs)  # CSRF 로 막히는 요청의 의심 입력도 기록되도록 먼저 실행
     app.before_request(security.check_csrf)
@@ -46,6 +50,17 @@ def create_app(overrides=None):
     app.after_request(security.add_headers)
     app.teardown_request(db.close_dbs)
     app.jinja_env.globals["csrf_token"] = security.csrf_token
+
+    @app.context_processor
+    def inject_pending_approvals():
+        """메뉴·홈의 결재 대기 배지. 로그인하지 않았거나 조회에 실패해도 화면이 깨지지 않게 0으로 둔다."""
+        user = getattr(g, "user", None)
+        if not user:
+            return {}
+        try:
+            return {"pending_approvals": approvals.pending_count(user["id"])}
+        except Exception:  # noqa: BLE001
+            return {"pending_approvals": 0}
 
     @app.get("/healthz")
     def healthz():

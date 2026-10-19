@@ -21,6 +21,8 @@ def connect_root():
 
 def cleanup(con):
     with con.cursor() as cur:
+        cur.execute(f"DELETE FROM leave_requests WHERE user_id IN {_ZZ} OR decided_by IN {_ZZ}")
+        cur.execute(f"DELETE FROM attendance WHERE user_id IN {_ZZ}")
         cur.execute(f"DELETE FROM posts WHERE author_id IN {_ZZ}")
         cur.execute(f"DELETE FROM approval_steps WHERE approver_id IN {_ZZ} "
                     f"OR approval_id IN (SELECT id FROM approvals WHERE requester_id IN {_ZZ})")

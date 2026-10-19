@@ -8,11 +8,12 @@
 
 | 구분 | 기능 |
 |---|---|
-| 그룹웨어 | 로그인·로그아웃, 문서함(일반/기밀), 직원 검색, 공지사항·자유게시판(첨부 업로드), 전자결재, 비밀번호 변경 |
+| 그룹웨어 | 로그인·로그아웃, 문서함(일반/기밀), 직원 검색, 공지사항·자유게시판(첨부 업로드, 그림·PDF 붙여넣기와 글 화면 미리보기), 전자결재, 비밀번호 변경, 프로필 사진(올리기·바꾸기·지우기, 상단바 아바타) |
 | ERP | 급여(본인·팀·전체 범위), 경비 등록·상신, 재무 보고(기밀) |
-| 전자결재 | 상신자가 정하는 순차 결재선(최대 5명), 승인·반려(사유 필수), 상신 철회, 결재란 화면 |
+| 인사(HR) | 인사카드(사번·입사일·근속·연차), 조직도, 근태관리(출퇴근·지각 표시), 휴가관리(연차·반차·병가 신청, 팀장·관리자 승인·반려, 취소) |
+| 전자결재 | 공문 양식 화면(기관명·문서번호·결재란·제목·시행일자·기안·수신·참조·본문·붙임·끝·발신 명의, 인쇄 가능)과 서식 편집기(글자 크기·색·배경·정렬·제목·목록, 표 삽입·행/열 추가·칸 합치기), 양식 5종(일반 기안·업무 협조·출장 신청·구매 요청·**지출결의서**)과 문서번호, 긴급 표시, 상신자가 정하는 순차 결재선(최대 5명), 참조자, 첨부(상신할 때와 결재자가 승인·반려할 때, 개수·형식·용량 제한 없음, 단계별로 구분 표시), 승인 의견·반려 사유, 상신 철회, 재기안, 문서함(기안함·결재 대기·결재 예정·처리 완료·참조함)과 메뉴의 결재 대기 건수, 결재란 화면 |
 | AI 어시스턴트 | 대화 화면과 본인 대화 기록. 응답 생성부는 교체 가능한 접점(`CHAT_RESPONDER`)이고 기본값은 시험 응답 |
-| 관리자 | 사용자 목록, 역할 변경, 잠금 해제 |
+| 관리(시스템 관리) | 관리 현황(사용자·잠금·결재·휴가·출근·최근 보안 이벤트), 사용자 관리(등록·역할 변경·비밀번호 초기화·잠금·잠금 해제), 감사 로그(보안 이벤트 검색), 권한 현황(역할별 권한표) |
 | 보안 로그 | 모든 보안 이벤트를 JSON 한 줄로 `logs/security.jsonl`에 기록(탐지 담당이 수집) |
 | 메신저 연동 | 별도 네이티브 앱(nexus-messenger)이 토큰으로 로그인해 1:1·그룹 채팅하는 `/api/v1/*` API + Socket.IO 실시간 전송. 자세히는 [docs/02_메신저_API.md](docs/02_메신저_API.md) |
 
@@ -25,7 +26,7 @@
 | 세션 | HttpOnly·SameSite=Lax, 유휴 30분·절대 8시간, 로그아웃·비밀번호 변경 시 이전 쿠키 전부 무효화 |
 | 인가 | 서버에서 역할·소유자·팀 범위 검사, 사용자·역할·잠금은 요청마다 DB 재조회, `/admin/*` 블루프린트 단위 보호 |
 | 출력 | 자동 이스케이프(끄지 않음), CSP(인라인 스크립트·스타일 불가), nosniff, X-Frame-Options |
-| 업로드 | 확장자 허용목록 + 내용 확인, 웹루트 밖 저장, 무작위 파일명, 항상 첨부로만 다운로드 |
+| 업로드 | **게시판·결재 첨부는 형식·개수·용량 제한이 없다**(2026-10-19 사용자 결정). 대신 무해하게 다룬다: 무작위 파일명으로 웹루트 밖에 조각 단위로 저장(메모리에 통째로 올리지 않음), 이름은 안전한 문자만, 형식은 거부하지 않고 분류만(그림·PDF는 내용이 맞을 때만 인정, 나머지는 일반 바이너리), 읽을 수 없는 파일(백신 격리 등)은 404. 프로필 사진만 png·jpg + 내용 확인과 2MB 상한이 그대로다. 다운로드는 항상 첨부로, 그림(png·jpg)·PDF만 별도 미리보기 경로(`/attachments/<id>/view`)로 인라인 표시(경로 전용 CSP `default-src 'none'`, nosniff, 로그인 필요) |
 | DB 권한 | 일반 표는 `nexus_app`(필요한 열만 UPDATE), 기밀 표(기밀 문서·급여·재무)는 `nexus_conf`(읽기 전용) |
 | 결재 | 순차 결재·종결 상태 불변·자기 승인 금지(앱 + DB 트리거), 결재선 열은 앱 계정이 수정 불가 |
 | 로그 | 표준 필드의 JSON, 비밀번호·대화 내용 미기록, 의심 입력(`suspicious_input`)은 차단 없이 기록 |
@@ -79,7 +80,7 @@ python run.py
 ## 테스트와 점검
 
 ```bash
-python -m pytest -q                                   # 전체 자동 시험(463개, MySQL 컨테이너 필요)
+python -m pytest -q                                   # 전체 자동 시험(856개, MySQL 컨테이너 필요)
 python scripts/defense_check.py --report 결과.md      # 방어 점검 18항목(서버를 띄운 상태에서, 루프백만 허용)
 python scripts/red_team_extra.py --report 결과2.md    # 추가 공격 패턴 20항목(같은 전제, SSTI·동시성 경쟁 등)
 ```
@@ -90,10 +91,10 @@ python scripts/red_team_extra.py --report 결과2.md    # 추가 공격 패턴 2
 ## 폴더 구조
 
 ```
-app/            Flask 앱 (auth, portal, erp, approvals, admin, chat, messenger_api, realtime, security, db, validators, uploads)
+app/            Flask 앱 (auth, portal, erp, hr, profile, audit, richtext(결재 본문 살균기), approvals, admin, chat, messenger_api, realtime, security, db, validators, uploads)
   templates/    화면    static/  스타일(CSP 때문에 외부 글꼴·인라인 스타일 없음)
 db/             schema.sql, grants.sql(최소권한), init.sh(컨테이너 최초 기동 때 실행)
-scripts/        seed.py(시험 데이터), defense_check.py·red_team_extra.py(방어 점검)
+scripts/        seed.py(시험 데이터), migrate_hr.py·migrate_approval.py(이미 있는 DB 에 인사·전자결재 확장 추가), create_team_admins.py, defense_check.py·red_team_extra.py(방어 점검)
 tests/          pytest 시험
 docs/           설계·검증·트러블슈팅·메신저 API·팀 연동 안내 문서
 run.py          개발·시연용 실행(서버 버전 비노출, 기본 루프백 — .env 의 APP_HOST 로 변경, Socket.IO 포함)

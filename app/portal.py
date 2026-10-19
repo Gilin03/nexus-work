@@ -4,7 +4,7 @@
 - 첨부는 확장자 허용목록 + 내용 확인 후 웹루트 밖에 무작위 이름으로 저장하고, 항상 첨부(다운로드)로만 내려준다."""
 from pathlib import Path
 
-from flask import Blueprint, abort, current_app, g, redirect, render_template, request, send_from_directory, url_for
+from flask import Blueprint, abort, current_app, g, redirect, render_template, request, url_for
 
 from . import db, uploads, validators
 from .auth import login_required, role_required
@@ -15,11 +15,6 @@ bp = Blueprint("portal", __name__)
 BOARDS = {"notice": "공지사항", "free": "자유게시판"}
 PAGE_SIZE = 20
 MAX_PAGE = 10000
-UPLOAD_MESSAGES = {
-    "extension_not_allowed": "허용되지 않는 파일 형식입니다 (pdf, png, jpg, txt만 가능).",
-    "content_mismatch": "파일 내용이 확장자와 일치하지 않습니다.",
-    "empty_upload": "빈 파일입니다.",
-}
 POST_FORM_ERROR = "제목은 1~120자, 내용은 1~5000자로 입력하세요(제어문자 사용 불가)."
 
 
@@ -129,26 +124,21 @@ def post_new(board):
         log_event("input_rejected", "DENY", str(exc), field="post")
         return render_template("post_form.html", board=board, name=BOARDS[board], error=POST_FORM_ERROR), 400
 
-    upload = request.files.get("attachment")
-    meta = data = None
-    if upload and upload.filename:
-        data = upload.read()
-        try:
-            _ext, mime, display, digest = uploads.inspect_upload(upload.filename, data)
-        except ValueError as exc:
-            log_event("upload_reject", "BLOCK", str(exc), filename=upload.filename[:100], size=len(data))
-            return render_template("post_form.html", board=board, name=BOARDS[board],
-                                   error=UPLOAD_MESSAGES.get(str(exc), "업로드할 수 없는 파일입니다.")), 400
-        meta = (mime, display, digest)
-
+    uploaded = [f for f in request.files.getlist("attachment") if f and f.filename]   # 개수·형식·용량 제한 없음(무해하게 저장)
     post_id = db.execute("INSERT INTO posts(board, author_id, title, body) VALUES(%s, %s, %s, %s)",
                          (board, g.user["id"], title, body))
-    if meta:
-        # ponytail: 파일을 먼저 쓰고 DB 행을 넣는다. 그 사이 실패하면 고아 파일이 남을 수 있다(정기 정리 스크립트로 해결 가능).
-        stored = uploads.store(Path(current_app.config["UPLOAD_DIR"]), data)
-        db.execute("INSERT INTO attachments(post_id, stored_name, orig_name, mime, size, sha256) "
-                   "VALUES(%s, %s, %s, %s, %s, %s)", (post_id, stored, meta[1], meta[0], len(data), meta[2]))
-    log_event("post_created", "INFO", "ok", post_id=post_id, board=board, attachment=bool(meta))
+    saved = []
+    try:
+        for f in uploaded:
+            meta = uploads.save_attachment(Path(current_app.config["UPLOAD_DIR"]), f)
+            saved.append(meta)
+            db.execute("INSERT INTO attachments(post_id, stored_name, orig_name, mime, size, sha256) VALUES(%s, %s, %s, %s, %s, %s)",
+                       (post_id, meta["stored_name"], meta["orig_name"], meta["mime"], meta["size"], meta["sha256"]))
+    except BaseException:  # 도중에 실패(디스크 부족 등)하면 글도 롤백되므로 이미 쓴 파일도 지운다
+        uploads.remove_saved(Path(current_app.config["UPLOAD_DIR"]), saved)
+        raise
+    log_event("post_created", "INFO", "ok", post_id=post_id, board=board, attachment=bool(saved), attachments=len(saved),
+              bytes=sum(m["size"] for m in saved))
     return redirect(url_for("portal.post_view", post_id=post_id), 303)
 
 
@@ -160,7 +150,7 @@ def post_view(post_id):
         "FROM posts p JOIN users u ON u.id = p.author_id WHERE p.id = %s", (post_id,))
     if not post:
         abort(404)
-    files = db.query_all("SELECT id, orig_name, size FROM attachments WHERE post_id = %s ORDER BY id", (post_id,))
+    files = db.query_all("SELECT id, orig_name, size, mime FROM attachments WHERE post_id = %s ORDER BY id", (post_id,))
     can_delete = post["author_id"] == g.user["id"] or g.user["role"] == "admin"
     return render_template("post.html", post=post, files=files, can_delete=can_delete,
                            board_name=BOARDS.get(post["board"], ""))
@@ -184,6 +174,30 @@ def post_delete(post_id):
     return redirect(url_for("portal.board_list", board=post["board"]), 303)
 
 
+# ---------- 첨부 미리보기(그림·PDF) ----------
+# 앱이 올린 파일만 인라인으로 보여 준다: 이미지는 같은 출처의 <img> 로, PDF 는 새 탭(최상위 문서)으로 연다.
+# 허용 형식은 업로드 때 확장자와 내용(매직바이트)이 모두 맞은 png·jpg·pdf 뿐이며 txt 등은 다운로드만 된다.
+# nosniff 로 브라우저가 형식을 다시 추측하지 못하게 하고, 이 응답은 어떤 하위 자원도 불러올 수 없는 CSP 를 직접 붙인다.
+# 이미지는 sandbox 까지 걸어 어떤 문서로 해석되더라도 스크립트가 실행되지 않는다(PDF 뷰어는 sandbox 와 맞지 않아 뺀다).
+INLINE_CSP = {"image/png": "default-src 'none'; sandbox", "image/jpeg": "default-src 'none'; sandbox",
+              "application/pdf": "default-src 'none'"}
+
+
+@bp.get("/attachments/<int:att_id>/view")
+@login_required
+def attachment_view(att_id):
+    row = db.query_one("SELECT stored_name, orig_name, mime FROM attachments WHERE id = %s", (att_id,))
+    directory = Path(current_app.config["UPLOAD_DIR"])
+    if not row or row["mime"] not in INLINE_CSP or not (directory / row["stored_name"]).is_file():
+        abort(404)
+    log_event("attachment_view", "INFO", "ok", attachment_id=att_id)
+    resp = uploads.send_stored(directory, row["stored_name"], as_attachment=False,
+                               download_name=row["orig_name"], mimetype=row["mime"])
+    resp.headers["Content-Security-Policy"] = INLINE_CSP[row["mime"]]
+    resp.headers["Cross-Origin-Resource-Policy"] = "same-origin"
+    return resp
+
+
 # ---------- 첨부 다운로드 ----------
 @bp.get("/attachments/<int:att_id>")
 @login_required
@@ -194,5 +208,5 @@ def attachment(att_id):
         abort(404)
     log_event("attachment_download", "INFO", "ok", attachment_id=att_id)
     # 저장명은 서버가 만든 uuid 라서 경로 조작이 불가능하고, 항상 첨부(다운로드)로만 내려 브라우저가 실행·렌더링하지 않는다.
-    return send_from_directory(directory, row["stored_name"], as_attachment=True,
+    return uploads.send_stored(directory, row["stored_name"], as_attachment=True,
                                download_name=row["orig_name"], mimetype=row["mime"])

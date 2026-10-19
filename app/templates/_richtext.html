@@ -1,0 +1,9 @@
+{# 살균한 노드 트리(app/richtext.py)를 다시 그린다. 문자열을 HTML 로 내보내지 않고 자동 이스케이프에 맡긴다(태그 이름도 허용 목록 값뿐이다). #}
+{% macro node(n) -%}
+{%- if n is string -%}{{ n }}
+{%- elif n.t == 'br' -%}<br>
+{%- elif n.t == 'hr' -%}<hr>
+{%- else -%}<{{ n.t }}{% if n.c %} class="{{ n.c }}"{% endif %}{% for k, v in n.a.items() %} {{ k }}="{{ v }}"{% endfor %}>{% for ch in n.k %}{{ node(ch) }}{% endfor %}</{{ n.t }}>
+{%- endif -%}
+{%- endmacro %}
+{% macro render(nodes) -%}{% for n in nodes %}{{ node(n) }}{% endfor %}{%- endmacro %}

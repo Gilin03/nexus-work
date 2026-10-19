@@ -83,7 +83,9 @@ def pages(d):
     return ["/", "/chat", "/documents", f"/documents/{d['doc']}", "/confidential", f"/confidential/{d['conf']}", "/employees",
             "/boards/free", "/boards/notice", "/boards/free/new", f"/posts/{d['post']}", "/expenses", "/expenses/new",
             f"/expenses/{d['exp']}", "/approvals", "/approvals/new", f"/approvals/{d['ap']}", f"/approvals/{d['rej']}",
-            "/payroll", f"/payroll/{d['pay']}", "/finance", f"/finance/{d['report']}", "/admin/users", "/account/password"]
+            "/payroll", f"/payroll/{d['pay']}", "/finance", f"/finance/{d['report']}", "/admin/users", "/account/password",
+            "/account/photo", "/hr/cards", "/hr/org", "/hr/attendance", "/hr/leave", "/hr/leave/new",
+            "/admin/overview", "/admin/audit", "/admin/permissions", "/admin/users/new", "/approvals/new?type=expenditure"]
 
 
 # ---------- 모든 화면 공통 ----------
@@ -94,7 +96,10 @@ def test_every_page_is_csp_safe_and_accessible(aapp, data):
         assert r.status_code == 200, path
         html = r.get_data(as_text=True)
         assert '<html lang="ko">' in html, path
-        assert not re.search(r"\sstyle=|<script|\son[a-z]+=|javascript:", html), path               # CSP: 인라인 스타일·스크립트 없음
+        assert not re.search(r"\sstyle=|\son[a-z]+=|javascript:", html), path                       # CSP: 인라인 스타일·핸들러 없음
+        # 스크립트는 같은 출처 /static/ 파일(src)만 허용하고 인라인 스크립트는 없다
+        assert all(re.fullmatch(r'<script src="/static/[\w.-]+\.js"(?: defer)?></script>', t)
+                   for t in re.findall(r"<script\b.*?</script>", html, re.S)), path
         assert not re.search(r"""(?:src|href|action)=["']https?://""", html), path                    # 외부 리소스 없음
         assert 'class="skip" href="#main"' in html and 'id="main"' in html, path
         assert '<nav aria-label="주 메뉴">' in html, path
@@ -187,6 +192,7 @@ def token(name):
 @pytest.mark.parametrize("fg,bg", [
     ("ink", "paper"), ("ink", "sheet"), ("ink-2", "paper"), ("ink-2", "sheet"), ("pen", "sheet"), ("pen", "paper"),
     ("seal", "sheet"), ("seal", "seal-bg"), ("side-text", "side"), ("side-muted", "side"),
+    ("ok", "sheet"), ("warn", "sheet"), ("pen", "sheet"),
 ])
 def test_text_color_pairs_meet_wcag_aa(fg, bg):
     assert contrast(token(fg), token(bg)) >= 4.5, (fg, bg, contrast(token(fg), token(bg)))
@@ -194,6 +200,9 @@ def test_text_color_pairs_meet_wcag_aa(fg, bg):
 
 def test_filled_buttons_and_alerts_meet_contrast():
     assert contrast("#ffffff", token("pen")) >= 4.5
+    assert contrast("#ffffff", token("gray-btn")) >= 4.5          # 로그아웃 버튼(흰 글자)
+    assert contrast("#ffffff", "#46557c") >= 4.5                  # 그 버튼에 마우스를 올렸을 때
+    assert contrast("#ffffff", "#0a3fb8") >= 4.5                  # 파란 버튼에 마우스를 올렸을 때
     assert contrast("#ffffff", "#173d7c") >= 4.5                  # 마우스를 올렸을 때의 파란 버튼
     assert contrast("#8f0c21", token("seal-bg")) >= 4.5           # 경고 상자 글자
 

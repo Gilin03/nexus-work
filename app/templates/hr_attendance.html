@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}근태관리 · NEXUS WORK{% endblock %}
+{% block content %}
+<h1>근태관리</h1>
+{% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+<div class="sheet">
+  <h2>오늘 ({{ today.strftime('%Y-%m-%d') }})</h2>
+  <p>
+    {% if not mine %}아직 출근 전입니다.
+    {% else %}출근 {{ mine.check_in.strftime('%H:%M') }}{% if mine.check_out %} · 퇴근 {{ mine.check_out.strftime('%H:%M') }}{% else %} · 근무 중{% endif %}{% endif %}
+  </p>
+  <div class="actions">
+    {% if not mine %}
+    <form method="post" action="{{ url_for('hr.check_in') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn primary">출근</button>
+    </form>
+    {% elif not mine.check_out %}
+    <form method="post" action="{{ url_for('hr.check_out') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button type="submit" class="btn primary">퇴근</button>
+    </form>
+    {% endif %}
+  </div>
+  <p class="hint">시각은 서버의 한국 시간으로 기록되며 09:00 이후 출근은 지각으로 표시됩니다.</p>
+</div>
+
+<form method="get" action="{{ url_for('hr.attendance') }}" class="toolbar">
+  <label>월
+    <input name="month" value="{{ month }}" maxlength="7" pattern="\d{4}-(0[1-9]|1[0-2])" placeholder="2026-10">
+  </label>
+  <button type="submit" class="btn">조회</button>
+</form>
+<div class="sheet">
+  <h2>{{ month }} 근태{% if show_names %} <span class="hint">(내 팀·전체 범위는 역할에 따라 다릅니다)</span>{% endif %}</h2>
+  {% if rows %}
+  <div class="scroll">
+    <table>
+      <thead><tr><th>날짜</th>{% if show_names %}<th>직원</th><th>부서</th>{% endif %}<th class="num">출근</th><th class="num">퇴근</th><th>상태</th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <td>{{ r.work_date.strftime('%Y-%m-%d') }}</td>
+          {% if show_names %}<td>{{ r.display_name }}</td><td>{{ r.dept }}</td>{% endif %}
+          <td class="num">{{ r.check_in.strftime('%H:%M') }}</td>
+          <td class="num">{{ r.check_out.strftime('%H:%M') if r.check_out else '-' }}</td>
+          <td>{% if r.late %}<span class="st st-rejected">지각</span>{% else %}<span class="st st-approved">정상</span>{% endif %}{% if not r.check_out %} <span class="st st-draft">미퇴근</span>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="hint">이 달의 근태 기록이 없습니다.</p>
+  {% endif %}
+</div>
+{% endblock %}

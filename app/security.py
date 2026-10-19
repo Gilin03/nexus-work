@@ -9,7 +9,7 @@ from collections import defaultdict, deque
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 
-from flask import abort, g, request, session
+from flask import abort, current_app, g, request, session
 
 _logger = logging.getLogger("nexus.security")
 _logger.propagate = False
@@ -101,12 +101,27 @@ def check_csrf():
         abort(403)
 
 
+# ---- 첨부 업로드의 본문 상한 ----
+# 첨부를 받는 요청만 상한을 푼다(설정 UPLOAD_MAX_BYTES, 비어 있으면 제한 없음). 나머지 요청은 MAX_CONTENT_LENGTH(2MB)가 그대로 적용된다.
+# 폼의 글자 칸 크기(500KB)와 한 요청의 폼 항목 수(1000)는 프레임워크 기본 보호를 유지한다.
+UPLOAD_ENDPOINTS = ("portal.post_new", "approvals.approval_new", "approvals.approval_decide")
+
+
+NO_LIMIT = 1 << 62  # Flask 는 max_content_length=None 을 "설정 파일의 값을 쓴다"로 해석하므로, 제한 없음은 사실상 무한대 값으로 표현한다
+
+
+def apply_upload_limit():
+    if request.endpoint in UPLOAD_ENDPOINTS:
+        request.max_content_length = current_app.config["UPLOAD_MAX_BYTES"] or NO_LIMIT
+
+
 # ---- 응답 헤더 ----
 def add_headers(resp):
-    resp.headers["Content-Security-Policy"] = (
+    # 첨부 미리보기 경로(portal.attachment_view)처럼 더 엄격한 CSP 를 직접 정한 응답은 그대로 둔다.
+    resp.headers.setdefault("Content-Security-Policy", (
         "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
         "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
-    )
+    ))
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["Referrer-Policy"] = "no-referrer"

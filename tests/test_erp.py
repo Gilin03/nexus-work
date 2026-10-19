@@ -366,7 +366,9 @@ def test_create_general_approval_with_a_chain(aapp, root, events):
 
 def test_new_approval_form_lists_candidates(aapp, root):
     html = as_user(aapp, "zz_emp").get("/approvals/new").get_data(as_text=True)
-    assert f'value="{uid(root, "zz_mgr")}"' in html and f'value="{uid(root, "zz_emp2")}"' not in html
+    approvers = html.split('name="cc"')[0]                                   # 결재자 선택 칸(참조자 칸은 모든 직원을 보여 준다)
+    assert f'value="{uid(root, "zz_mgr")}"' in approvers and f'value="{uid(root, "zz_emp2")}"' not in approvers
+    assert f'value="{uid(root, "zz_emp2")}"' in html.split('name="cc"')[1]   # 직원도 참조자는 될 수 있다
 
 
 @pytest.mark.parametrize("title,body", [("", "내용"), ("a" * 201, "내용"), ("제목", ""), ("제목", "a" * 2001), ("제\n목", "내용"), ("제목", "널\x00")])

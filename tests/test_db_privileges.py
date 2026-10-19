@@ -41,8 +41,36 @@ def run(con, sql):
 
 APP_ALLOWED = [f"SELECT COUNT(*) FROM {t}" for t in (
     "users", "employees", "documents", "posts", "attachments", "chat_messages", "expenses", "approvals",
-    "approval_steps")]
+    "approval_steps", "profile_photos", "attendance", "leave_requests", "approval_cc", "approval_files", "expenditures", "expenditure_items")]
 APP_DENIED = [
+    # 지출결의서: 상신한 뒤에는 금액·내역을 바꾸거나 지울 수 없다
+    "UPDATE expenditures SET total_amount=1",
+    "UPDATE expenditures SET payee='x'",
+    "DELETE FROM expenditures",
+    "UPDATE expenditure_items SET amount=1",
+    "UPDATE expenditure_items SET qty=1",
+    "DELETE FROM expenditure_items",
+    # 전자결재 확장: 양식·긴급도는 만든 뒤 바꿀 수 없고, 참조자·첨부는 수정·삭제할 수 없다
+    "UPDATE approvals SET doc_type='trip'",
+    "UPDATE approvals SET urgency='urgent'",
+    "UPDATE approval_cc SET user_id=1",
+    "DELETE FROM approval_cc",
+    "UPDATE approval_files SET orig_name='x'",
+    "DELETE FROM approval_files",
+    # 근태: 퇴근 시각 외에는 수정할 수 없고 지울 수 없다(이력 유지)
+    "UPDATE attendance SET check_in=NOW()",
+    "UPDATE attendance SET user_id=1",
+    "DELETE FROM attendance",
+    # 휴가: 신청자·종류·기간·일수는 수정할 수 없고 지울 수 없다
+    "UPDATE leave_requests SET days=30",
+    "UPDATE leave_requests SET user_id=1",
+    "UPDATE leave_requests SET start_date=NOW()",
+    "UPDATE leave_requests SET reason='x'",
+    "DELETE FROM leave_requests",
+    # 직원 마스터(사번·입사일·연차)는 앱 계정이 바꿀 수 없다
+    "UPDATE employees SET annual_days=99",
+    "UPDATE employees SET hire_date=NOW()",
+    "UPDATE profile_photos SET mime='x'",
     "SELECT COUNT(*) FROM confidential_documents",
     "SELECT COUNT(*) FROM payroll",
     "SELECT COUNT(*) FROM financial_reports",
@@ -87,6 +115,8 @@ def test_app_allowed(app, sql):
 
 
 APP_ALLOWED_WRITES = [  # 해당 열은 수정할 수 있어야 한다(WHERE id=0 이라 실제 행은 바뀌지 않는다)
+    "UPDATE attendance SET check_out=NOW() WHERE id=0",
+    "UPDATE leave_requests SET status='approved', decided_by=1, decided_at=NOW(), decision_reason='x' WHERE id=0",
     "UPDATE users SET password_hash='x' WHERE id=0",
     "UPDATE users SET failed_count=0 WHERE id=0",
     "UPDATE users SET locked_until=NULL WHERE id=0",

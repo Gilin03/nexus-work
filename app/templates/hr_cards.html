@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}인사카드 · NEXUS WORK{% endblock %}
+{% block content %}
+<h1>인사카드</h1>
+<div class="sheet">
+  <p class="hint">직원은 본인, 팀장은 같은 부서, 관리자는 전체 인사카드를 볼 수 있습니다.</p>
+  {% if rows %}
+  <div class="scroll">
+    <table>
+      <thead><tr><th>사번</th><th>이름</th><th>부서</th><th>직책</th><th class="num">내선</th><th class="num">입사일</th><th></th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <td>{{ r.emp_no or '-' }}</td>
+          <td>{{ r.name }}</td>
+          <td>{{ r.dept }}</td>
+          <td>{{ r.title }}</td>
+          <td class="num">{{ r.ext }}</td>
+          <td class="num">{{ r.hire_date.strftime('%Y-%m-%d') if r.hire_date else '-' }}</td>
+          <td><a href="{{ url_for('hr.card_detail', emp_id=r.id) }}">상세</a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="hint">조회할 수 있는 인사카드가 없습니다.</p>
+  {% endif %}
+</div>
+{% endblock %}

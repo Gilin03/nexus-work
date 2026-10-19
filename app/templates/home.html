@@ -3,6 +3,9 @@
 {% block content %}
 <h1>{{ g.user.display_name }}님, 안녕하세요</h1>
 <p class="hint">{{ g.user.dept }} · 권한 {{ g.user.role }}</p>
+{% if pending_approvals %}
+<p class="notice" role="status">결재할 문서가 {{ pending_approvals }}건 있습니다. <a href="{{ url_for('approvals.approval_list', box='wait') }}">결재 대기 문서함으로 가기</a></p>
+{% endif %}
 <div class="sheet">
   <h2>업무</h2>
   <ul class="menu-list">

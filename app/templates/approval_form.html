@@ -4,18 +4,101 @@
 <a class="crumb" href="{{ url_for('approvals.approval_list') }}">&larr; 전자결재</a>
 <h1>결재 상신</h1>
 <div class="sheet">
-  <p class="hint">결재선은 상신자가 직접 정합니다. 팀장 또는 관리자를 최대 {{ max_steps }}명까지 순서대로 고르세요.</p>
+  <p class="hint">양식을 고르면 내용 칸에 작성 틀이 채워집니다(작성하던 내용은 사라지니 양식을 먼저 고르세요).</p>
+  <p class="form-types" aria-label="양식 선택">
+    {% for key in form_types %}<a class="btn{% if values.doc_type == key %} primary{% endif %}" href="{{ url_for('approvals.approval_new', type=key) }}">{{ types[key][0] }}</a>{% endfor %}
+  </p>
   {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
-  <form method="post" action="{{ url_for('approvals.approval_new') }}">
+  <form method="post" action="{{ url_for('approvals.approval_new') }}" enctype="multipart/form-data">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="doc_type" value="{{ values.doc_type }}">
+    <p>양식: <strong>{{ types[values.doc_type][0] }}</strong></p>
     <label>제목
-      <input name="title" required maxlength="200">
+      <input name="title" required maxlength="200" value="{{ values.title }}">
     </label>
-    <label>내용
-      <textarea name="body" required maxlength="2000" rows="6"></textarea>
+    <label>수신 (선택 — 공문의 받는 곳. 비우면 내부 결재로 표시됩니다)
+      <input name="recipient" maxlength="100" value="{{ values.recipient }}" placeholder="예: 영업팀장">
     </label>
+    {% if values.doc_type == 'expenditure' %}
+    {% set x = values.exd %}
+    <fieldset class="exd">
+      <legend>지출 내용</legend>
+      <label>지출 일자
+        <input type="date" name="spend_date" required value="{{ x.spend_date }}">
+      </label>
+      <label>계정과목
+        <select name="account_name">
+          {% for a in accounts %}<option value="{{ a }}"{% if x.account_name == a %} selected{% endif %}>{{ a }}</option>{% endfor %}
+        </select>
+      </label>
+      <fieldset>
+        <legend>지급 방법</legend>
+        {% for key, label in pay_methods.items() %}
+        <label class="choice"><input type="radio" name="pay_method" value="{{ key }}"{% if x.pay_method == key %} checked{% endif %}> {{ label }}</label>
+        {% endfor %}
+      </fieldset>
+      <label>지급처(거래처)
+        <input name="payee" required maxlength="100" value="{{ x.payee }}">
+      </label>
+      <label id="exd-account-label">지급 계좌 (계좌이체일 때 필수, 은행·계좌번호·예금주)
+        <input name="payee_account" maxlength="100" value="{{ x.payee_account }}" autocomplete="off">
+      </label>
+      <label>지급 예정일 (선택)
+        <input type="date" name="pay_due" value="{{ x.pay_due }}">
+      </label>
+      <label>증빙 종류 (증빙 파일은 아래 첨부에 올리세요)
+        <select name="evidence">
+          {% for key, label in evidence_types.items() %}<option value="{{ key }}"{% if x.evidence == key %} selected{% endif %}>{{ label }}</option>{% endfor %}
+        </select>
+      </label>
+    </fieldset>
+    <div class="field exd-items">
+      <span class="field-label">지출 내역</span>
+      <div class="scroll">
+        <table class="exd-table">
+          <thead><tr><th>번호</th><th>항목</th><th>적요</th><th>수량</th><th>단가(원)</th><th>금액(원)</th></tr></thead>
+          <tbody id="exd-rows" data-max="{{ max_rows }}">
+            {% for r in x.rows %}
+            <tr class="exd-row">
+              <td class="num">{{ loop.index }}</td>
+              <td><input name="item_{{ loop.index }}" maxlength="100" aria-label="항목 {{ loop.index }}" value="{{ r.item }}"></td>
+              <td><input name="memo_{{ loop.index }}" maxlength="100" aria-label="적요 {{ loop.index }}" value="{{ r.memo }}"></td>
+              <td><input name="qty_{{ loop.index }}" inputmode="numeric" aria-label="수량 {{ loop.index }}" value="{{ r.qty }}" class="num"></td>
+              <td><input name="price_{{ loop.index }}" inputmode="numeric" aria-label="단가 {{ loop.index }}" value="{{ r.price }}" class="num"></td>
+              <td class="num exd-amount">-</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+          <tfoot><tr><th colspan="5">합계</th><td class="num" id="exd-total">-</td></tr></tfoot>
+        </table>
+      </div>
+      <p class="actions"><button type="button" class="btn" id="exd-add">행 추가</button></p>
+      <p class="hint">금액은 수량×단가이며 화면의 합계는 참고용입니다. 저장되는 금액은 서버가 다시 계산합니다(최대 {{ max_rows }}줄).</p>
+    </div>
+    {% endif %}
+    <div class="field rt-field">
+      <span class="field-label" id="body-label">내용</span>
+      {# 자바스크립트가 켜져 있으면 이 칸이 서식 편집기(글자 서식·표)로 바뀌고, 꺼져 있으면 일반 글 칸으로 쓰인다. 편집기 내용은 서버가 다시 살균한다. #}
+      <textarea name="body" id="body-source" rows="9" aria-label="내용" data-format="{{ 'html' if values.body_html else 'text' }}">{{ values.body }}</textarea>
+      <input type="hidden" name="body_format" id="body-format" value="text">
+    </div>
+    <fieldset>
+      <legend>긴급도</legend>
+      {% for key, label in urgency.items() %}
+      <label class="choice"><input type="radio" name="urgency" value="{{ key }}"{% if values.urgency == key %} checked{% endif %}> {{ label }}</label>
+      {% endfor %}
+    </fieldset>
     {% include "_approver_fields.html" %}
+    <label>참조자 (선택, 최대 {{ max_cc }}명. Ctrl 키로 여러 명 선택) — 결재는 하지 않지만 문서를 볼 수 있습니다
+      <select name="cc" multiple size="6">
+        {% for c in cc_candidates %}<option value="{{ c.id }}"{% if c.id in values.cc %} selected{% endif %}>{{ c.display_name }} · {{ c.dept }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>첨부 (선택, 여러 개 가능 · 형식·개수·용량 제한 없음)
+      <input type="file" name="attachments" multiple>
+    </label>
     <button type="submit" class="btn primary">상신</button>
   </form>
 </div>
 {% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='rich-editor.js') }}" defer></script>{% if values.doc_type == 'expenditure' %}<script src="{{ url_for('static', filename='expenditure.js') }}" defer></script>{% endif %}{% endblock %}

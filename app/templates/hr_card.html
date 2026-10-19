@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}{{ e.name }} 인사카드 · NEXUS WORK{% endblock %}
+{% block content %}
+<a class="crumb" href="{{ url_for('hr.card_list') }}">&larr; 인사카드 목록</a>
+<h1>인사카드</h1>
+<div class="sheet narrow">
+  <table class="facts">
+    <tbody>
+      <tr><th scope="row">사번</th><td>{{ e.emp_no or '-' }}</td></tr>
+      <tr><th scope="row">이름</th><td>{{ e.name }}</td></tr>
+      <tr><th scope="row">부서</th><td>{{ e.dept }}</td></tr>
+      <tr><th scope="row">직책</th><td>{{ e.title }}</td></tr>
+      <tr><th scope="row">내선</th><td>{{ e.ext }}</td></tr>
+      <tr><th scope="row">입사일</th><td>{{ e.hire_date.strftime('%Y-%m-%d') if e.hire_date else '-' }}</td></tr>
+      <tr><th scope="row">근속</th><td>{% if tenure is not none %}{{ tenure // 12 }}년 {{ tenure % 12 }}개월{% else %}-{% endif %}</td></tr>
+      <tr><th scope="row">{{ year }}년 연차</th>
+        <td>{% if balance %}부여 {{ e.annual_days }}일 · 사용(대기 포함) {{ '%g' % balance[1] }}일 · 잔여 {{ '%g' % balance[2] }}일{% else %}계정이 없는 직원입니다{% endif %}</td></tr>
+    </tbody>
+  </table>
+</div>
+{% endblock %}

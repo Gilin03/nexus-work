@@ -55,8 +55,10 @@ def main():
         else:
             cur.execute("INSERT INTO users(username,password_hash,role,display_name,dept) VALUES(%s,%s,'admin',%s,%s)",
                         (uname, ph.hash(INITIAL_PASSWORD), name, DEPT))
-            cur.execute("INSERT INTO employees(user_id,name,dept,title,ext) VALUES(%s,%s,%s,%s,%s)",
-                        (cur.lastrowid, name, DEPT, "관리자", str(2100 + n)))
+            user_id = cur.lastrowid
+            cur.execute("INSERT INTO employees(user_id,name,dept,title,ext,hire_date) VALUES(%s,%s,%s,%s,%s,CURDATE())",
+                        (user_id, name, DEPT, "관리자", str(2100 + n)))
+            cur.execute("UPDATE employees SET emp_no = CONCAT('NX-', YEAR(CURDATE()), '-', LPAD(id, 3, '0')) WHERE id = %s", (cur.lastrowid,))
             created.append(uname)
     con.commit()
     print(f"created: {created}  reset: {reset}  skipped(이미 있음): {skipped}  db={args.db}")

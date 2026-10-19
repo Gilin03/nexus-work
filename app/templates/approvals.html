@@ -3,19 +3,35 @@
 {% block title %}전자결재 · NEXUS WORK{% endblock %}
 {% block content %}
 <h1>전자결재</h1>
-<p><a class="btn primary" href="{{ url_for('approvals.approval_new') }}">결재 상신</a></p>
+<p class="actions">
+  <a class="btn primary" href="{{ url_for('approvals.approval_new') }}">결재 상신</a>
+</p>
+{% if counts.wait %}
+<p class="notice" role="status">지금 결재할 문서가 {{ counts.wait }}건 있습니다. <a href="{{ url_for('approvals.approval_list', box='wait') }}">결재 대기 문서함 보기</a></p>
+{% endif %}
+<nav class="tabs" aria-label="문서함">
+  <ul>
+    {% for key, label in boxes %}
+    <li><a href="{{ url_for('approvals.approval_list', box=key) }}" class="{{ 'on' if key == box else '' }}"{% if key == box %} aria-current="true"{% endif %}>{{ label }}{% if key != 'all' %} <span class="count">{{ counts[key] }}</span>{% endif %}</a></li>
+    {% endfor %}
+  </ul>
+</nav>
 <div class="sheet">
   {% if rows %}
   <div class="scroll">
     <table>
-      <thead><tr><th>제목</th><th>상신자</th><th>진행</th><th>상태</th><th></th></tr></thead>
+      <thead><tr><th>문서번호</th><th>양식</th><th>제목</th><th>상신자</th><th>상신일</th><th>진행</th><th>상태</th><th class="num">금액</th><th></th></tr></thead>
       <tbody>
       {% for r in rows %}
         <tr>
-          <td><a href="{{ url_for('approvals.approval_view', approval_id=r.id) }}">{{ r.title }}</a></td>
+          <td class="docno">{{ r.doc_no }}</td>
+          <td>{{ types[r.doc_type][0] }}</td>
+          <td>{% if r.urgency == 'urgent' %}<span class="st st-rejected">긴급</span> {% endif %}<a href="{{ url_for('approvals.approval_view', approval_id=r.id) }}">{{ r.title }}</a></td>
           <td>{{ r.requester }}</td>
+          <td class="num">{{ r.created_at.strftime('%Y-%m-%d') }}</td>
           <td>{% if r.status == 'pending' %}{{ r.current_step }} / {{ r.total }}단계{% endif %}</td>
           <td>{{ status(r.status) }}</td>
+          <td class="num">{% if r.total_amount %}{{ r.total_amount | won }}{% endif %}</td>
           <td>{% if r.needs_me %}<span class="flag">결재 필요</span>{% endif %}</td>
         </tr>
       {% endfor %}
@@ -23,7 +39,7 @@
     </table>
   </div>
   {% else %}
-  <p class="hint">결재 문서가 없습니다.</p>
+  <p class="hint">이 문서함에 결재 문서가 없습니다.</p>
   {% endif %}
 </div>
 {% endblock %}

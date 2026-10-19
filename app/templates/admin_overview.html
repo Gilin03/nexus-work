@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}관리 현황 · NEXUS WORK{% endblock %}
+{% block content %}
+<h1>관리 현황</h1>
+<ul class="stat-grid">
+  <li class="sheet stat"><span class="stat-n">{{ stats.users }}</span><span class="stat-l">전체 사용자</span></li>
+  <li class="sheet stat"><span class="stat-n">{{ stats.locked }}</span><span class="stat-l">잠긴 계정</span>{% if stats.locked %} <a href="{{ url_for('admin.users') }}">확인</a>{% endif %}</li>
+  <li class="sheet stat"><span class="stat-n">{{ stats.approvals }}</span><span class="stat-l">결재 대기</span></li>
+  <li class="sheet stat"><span class="stat-n">{{ stats.leaves }}</span><span class="stat-l">휴가 승인 대기</span></li>
+  <li class="sheet stat"><span class="stat-n">{{ stats.attendance }}</span><span class="stat-l">오늘 출근</span></li>
+</ul>
+<div class="org-grid">
+  <section class="sheet">
+    <h2>역할별 사용자</h2>
+    <table class="facts"><tbody>
+      <tr><th scope="row">직원 (employee)</th><td>{{ roles.get('employee', 0) }}명</td></tr>
+      <tr><th scope="row">팀장 (manager)</th><td>{{ roles.get('manager', 0) }}명</td></tr>
+      <tr><th scope="row">관리자 (admin)</th><td>{{ roles.get('admin', 0) }}명</td></tr>
+    </tbody></table>
+  </section>
+  <section class="sheet">
+    <h2>부서별 사용자</h2>
+    <table class="facts"><tbody>
+      {% for d in depts %}<tr><th scope="row">{{ d.dept }}</th><td>{{ d.n }}명</td></tr>{% endfor %}
+    </tbody></table>
+  </section>
+  <section class="sheet">
+    <h2>최근 24시간 보안 이벤트</h2>
+    {% if recent %}
+    <table class="facts"><tbody>
+      {% for name, n in recent %}<tr><th scope="row"><a href="{{ url_for('admin.audit_log', type=name) }}">{{ name }}</a></th><td>{{ n }}건</td></tr>{% endfor %}
+    </tbody></table>
+    {% else %}<p class="hint">최근 24시간 기록이 없습니다.</p>{% endif %}
+    <p><a href="{{ url_for('admin.audit_log') }}">감사 로그 전체 보기</a></p>
+  </section>
+</div>
+{% endblock %}

@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}권한 현황 · NEXUS WORK{% endblock %}
+{% block content %}
+<h1>권한 현황</h1>
+<div class="sheet">
+  <p class="hint">역할별로 서버가 실제로 강제하는 접근 규칙입니다(읽기 전용). 역할은 사용자 관리 화면에서 바꾸며 즉시 적용됩니다.</p>
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>기능</th>
+          <th>직원 (employee)<br><span class="hint">{{ counts.get('employee', 0) }}명</span></th>
+          <th>팀장 (manager)<br><span class="hint">{{ counts.get('manager', 0) }}명</span></th>
+          <th>관리자 (admin)<br><span class="hint">{{ counts.get('admin', 0) }}명</span></th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for name, emp, mgr, adm in rows %}
+        <tr>
+          <th scope="row">{{ name }}</th>
+          {% for v in (emp, mgr, adm) %}
+          <td>{% if v.startswith('불가') %}<span class="st st-rejected">불가</span>{% else %}{{ v }}{% endif %}</td>
+          {% endfor %}
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

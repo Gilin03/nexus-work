@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}조직도 · NEXUS WORK{% endblock %}
+{% block content %}
+<h1>조직도</h1>
+<p class="hint">전체 {{ total }}명 · {{ depts | length }}개 부서</p>
+<div class="org-grid">
+  {% for dept, members in depts.items() %}
+  <section class="sheet org-card" aria-labelledby="dept-{{ loop.index }}">
+    <h2 id="dept-{{ loop.index }}">{{ dept }} <span class="hint">{{ members | length }}명</span></h2>
+    <ul class="org-list">
+      {% for m in members %}
+      <li><strong>{{ m.name }}</strong> <span class="hint">{{ m.title }} · 내선 {{ m.ext }}</span></li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endfor %}
+</div>
+{% endblock %}
