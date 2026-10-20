@@ -14,6 +14,8 @@ from urllib.parse import urlsplit
 from flask import g, has_request_context
 
 FIELDS = set('ts event_type user role src_ip method path decision reason request_id source_component severity kind field count required resource action outcome tool mode conversation_id via token_fp api_path ms chars resource_id'.split())
+# 탐지에 쓰는 부가 필드(2026-10-20 추가, 비밀값 아님): 관리 작업 대상·변경 전후, AI 응답의 기밀 표지, 첨부·업로드 형식과 크기, AI 요청 정보
+FIELDS |= set('target old new markers has_token ext size bytes mime cloud context_chars attachment_chars errno'.split())
 
 
 def gelf(event, source):

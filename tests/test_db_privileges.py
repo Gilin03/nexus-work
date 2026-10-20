@@ -111,6 +111,7 @@ APP_DENIED = [
     # 고정 계정 표시는 앱 계정이 바꿀 수 없다(인사카드는 직급 title·부서 dept 만 수정 가능)
     "UPDATE users SET pinned=0",
     "UPDATE users SET pinned=1",
+    "UPDATE users SET ai_restricted=1",           # AI 제한은 n8n 전용 계정의 몫이다(앱 계정은 바꿀 수 없다)
     "UPDATE employees SET emp_no='x'",
     "UPDATE employees SET hire_date=NOW()",
     "UPDATE profile_photos SET mime='x'",

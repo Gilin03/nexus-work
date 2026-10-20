@@ -25,6 +25,7 @@ COLUMNS = {
     "pinned": "ALTER TABLE users ADD COLUMN pinned TINYINT(1) NOT NULL DEFAULT 0 AFTER session_version",
     "deleted_at": "ALTER TABLE users ADD COLUMN deleted_at DATETIME NULL AFTER created_at",
     "deleted_by": "ALTER TABLE users ADD COLUMN deleted_by INT UNSIGNED NULL AFTER deleted_at",
+    "ai_restricted": "ALTER TABLE users ADD COLUMN ai_restricted TINYINT(1) NOT NULL DEFAULT 0 AFTER pinned",   # R3 대응(AI 제한), ai-agent 브랜치와 같은 정의
 }
 GRANTS = [
     "GRANT UPDATE (title) ON `{db}`.employees TO 'nexus_app'@'%'",

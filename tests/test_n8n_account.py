@@ -7,7 +7,7 @@ from pathlib import Path
 import pymysql
 import pytest
 
-from support import login, sql, uid
+from support import as_user, login, post, sql, uid
 
 ROOT = Path(__file__).resolve().parents[1]
 _spec = importlib.util.spec_from_file_location("create_n8n_account", ROOT / "scripts" / "create_n8n_account.py")
@@ -25,7 +25,8 @@ def n8n_con(root):
                           user=USER, password=PW, database="nexus_test", autocommit=True)
     yield con
     con.close()
-    sql(root, f"DROP USER IF EXISTS '{USER}'@'%%'")
+    sql(root, f"DROP USER IF EXISTS '{USER}'@'%'")                  # 인자가 없는 문장이라 % 를 그대로 쓴다('%%' 면 없는 계정을 지우고 시험 계정이 남는다)
+    assert not sql(root, "SELECT 1 FROM mysql.user WHERE user = %s", (USER,))
 
 
 def run(con, query, args=None):
@@ -42,8 +43,8 @@ KILL_SESSIONS = "UPDATE users SET session_version = session_version + 1 WHERE us
 
 def test_grants_are_exactly_the_requested_columns():
     stmts = n8n.grant_statements("nexus")
-    assert stmts == ["GRANT SELECT (username, pinned, locked_until, session_version) ON `nexus`.users TO 'nexus_n8n'@'%'",
-                     "GRANT UPDATE (locked_until, session_version) ON `nexus`.users TO 'nexus_n8n'@'%'"]
+    assert stmts == ["GRANT SELECT (username, pinned, locked_until, session_version, ai_restricted) ON `nexus`.users TO 'nexus_n8n'@'%'",
+                     "GRANT UPDATE (locked_until, session_version, ai_restricted) ON `nexus`.users TO 'nexus_n8n'@'%'"]
 
 
 def test_n8n_can_look_up_lock_and_end_sessions(n8n_con, root):
@@ -106,3 +107,34 @@ def test_lock_from_n8n_cuts_an_open_portal_session(aapp, root, n8n_con):
     assert c.get("/hr/leave").status_code == 303                                    # 잠금도 열린 세션을 끊는다
     assert login(aapp.test_client(), "zz_emp").status_code == 401                   # 잠금 동안 로그인 불가
     sql(root, "UPDATE users SET locked_until = NULL WHERE id = %s", (uid(root, "zz_emp"),))
+
+
+# ---------- R3 대응: AI 제한 열(ai_restricted) ----------
+RESTRICT_AI = "UPDATE users SET ai_restricted = 1 WHERE username = %s"
+UNRESTRICT_AI = "UPDATE users SET ai_restricted = 0 WHERE username = %s"
+
+
+def test_n8n_restricts_ai_from_the_next_request_and_can_lift_it(aapp, root, n8n_con, events):
+    from app import chat
+    calls = []
+    aapp.config["CHAT_RESPONDER"] = lambda user, message, history: calls.append(message) or "정상 응답"
+    c = as_user(aapp, "zz_emp")
+    assert post(c, "/chat/messages", message="첫 질문").status_code == 303 and calls == ["첫 질문"]
+    run(n8n_con, RESTRICT_AI, ("zz_emp",))
+    assert run(n8n_con, "SELECT ai_restricted FROM users WHERE username = %s", ("zz_emp",)) == ((1,),)
+    assert post(c, "/chat/messages", message="둘째 질문").status_code == 303
+    assert calls == ["첫 질문"]                                                    # 응답기(외부 모델)를 부르지 않는다
+    last = sql(root, "SELECT content FROM chat_messages WHERE user_id=%s AND sender='assistant' ORDER BY id DESC LIMIT 1", (uid(root, "zz_emp"),))
+    assert last[0][0] == chat.RESTRICTED_REPLY
+    assert any(e["event_type"] == "ai_restricted_block" and e["decision"] == "DENY" for e in events())
+    assert c.get("/hr/leave").status_code == 200                                   # 포털의 다른 기능은 그대로 쓴다
+    run(n8n_con, UNRESTRICT_AI, ("zz_emp",))                                       # 해제
+    assert post(c, "/chat/messages", message="셋째 질문").status_code == 303 and calls[-1] == "셋째 질문"
+
+
+def test_admin_list_shows_the_ai_restriction(aapp, root, n8n_con):
+    run(n8n_con, RESTRICT_AI, ("zz_emp",))
+    html = as_user(aapp, "zz_adm").get("/admin/users").get_data(as_text=True)
+    start = html.index("<td>zz_emp")
+    row = html[start:html.index("</tr>", start)]
+    assert "AI 제한" in row

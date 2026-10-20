@@ -1,7 +1,8 @@
 """n8n 대응 워크플로 전용 DB 계정(nexus_n8n)을 만든다. root 계정으로 접속한다. 여러 번 실행해도 안전하다.
 
 사용: python scripts/create_n8n_account.py [--db nexus] [--rotate]
-- 권한은 users 표의 열 단위로만 준다: SELECT(username, pinned, locked_until, session_version), UPDATE(locked_until, session_version).
+- 권한은 users 표의 열 단위로만 준다: SELECT(username, pinned, locked_until, session_version, ai_restricted),
+  UPDATE(locked_until, session_version, ai_restricted). ai_restricted 는 R3 대응(AI 제한)용으로 10-20 에 더했다.
   역할(role)·비밀번호 해시·다른 표는 읽거나 바꿀 수 없고 INSERT·DELETE 도 없다.
 - 비밀번호는 .env 의 N8N_DB_PASSWORD 에서 읽는다. 없으면 무작위로 만들어 .env 에 적는다(화면·로그에는 쓰지 않는다). --rotate 는 새 값으로 바꾼다.
 - 계정 호스트는 '%' 다. Docker Desktop 의 포트 전달(NAT) 때문에 MySQL 은 모든 외부 접속을 Docker 게이트웨이(예: 172.21.0.1)에서 온 것으로 본다.
@@ -22,8 +23,8 @@ ROOT = Path(__file__).resolve().parent.parent
 ENV = ROOT / ".env"
 USER = "nexus_n8n"
 HOST = "%"
-SELECT_COLS = ("username", "pinned", "locked_until", "session_version")
-UPDATE_COLS = ("locked_until", "session_version")
+SELECT_COLS = ("username", "pinned", "locked_until", "session_version", "ai_restricted")
+UPDATE_COLS = ("locked_until", "session_version", "ai_restricted")       # ai_restricted: R3 대응 AI 제한·해제(2026-10-20 추가)
 
 
 def grant_statements(db, user=USER, host=HOST):

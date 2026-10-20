@@ -10,6 +10,7 @@ CREATE TABLE users (
   locked_until  DATETIME     NULL,
   session_version INT UNSIGNED NOT NULL DEFAULT 0,   -- 로그아웃·비밀번호 변경 때 올려 이전 세션 쿠키를 모두 무효화한다
   pinned        TINYINT(1)   NOT NULL DEFAULT 0,     -- 1 이면 최고관리자 고정 계정: admin·hongjh 두 계정뿐(아래 트리거가 정한다)
+  ai_restricted TINYINT(1)   NOT NULL DEFAULT 0,     -- 1 이면 AI 어시스턴트를 쓸 수 없다. n8n 이 R3 대응으로 바꾸고(해제도 n8n), 다음 요청부터 적용된다. 앱 계정은 바꿀 수 없다
   created_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
   deleted_at    DATETIME     NULL,                   -- 삭제한 계정(로그인·목록에서 빠지고 기록은 남는다). 최고관리자만 삭제한다
   deleted_by    INT UNSIGNED NULL

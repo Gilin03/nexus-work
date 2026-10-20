@@ -58,7 +58,7 @@
           </form>
           {% endif %}
         </td>
-        <td>{% if u.is_locked %}<span class="st st-locked">잠김</span>{% else %}정상{% endif %}{% if u.failed_count %} · 실패 {{ u.failed_count }}회{% endif %}</td>
+        <td>{% if u.is_locked %}<span class="st st-locked">잠김</span>{% else %}정상{% endif %}{% if u.ai_restricted %} · <span class="st st-locked" title="n8n 의 R3 대응. 해제도 n8n 으로">AI 제한</span>{% endif %}{% if u.failed_count %} · 실패 {{ u.failed_count }}회{% endif %}</td>
         <td>
           {% if u.is_locked or u.failed_count %}
           <form method="post" action="{{ url_for('admin.unlock', user_id=u.id) }}" class="inline">

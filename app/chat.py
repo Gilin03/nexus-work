@@ -9,6 +9,7 @@
 
 앱이 지키는 것: 로그인 필요, CSRF, 입력 길이·문자 검증, 사용자당 속도 제한, 대화 기록은 본인 것만 조회·표시, 응답도 이스케이프.
 대화 내용은 DB(chat_messages)에만 저장하고 보안 로그에는 글자 수만 남긴다.
+n8n 이 users.ai_restricted=1 로 바꾼 사용자(R3 대응)는 다음 요청부터 응답기를 부르지 않고 제한 안내만 받는다.
 첨부 파일(chat_attach)은 저장하지 않고 뽑은 글자를 g.chat_attachment 로 응답기에 넘긴다(그 질문에만 쓰인다)."""
 import re
 import secrets
@@ -27,6 +28,7 @@ MAX_REPLY = 8000
 HISTORY_SHOWN = 50
 HISTORY_FOR_RESPONDER = 10
 FALLBACK_REPLY = "답변을 만들지 못했습니다. 잠시 후 다시 시도하세요."
+RESTRICTED_REPLY = "보안 조치로 AI 어시스턴트 사용이 제한된 계정입니다. 관리자에게 해제를 요청하세요."
 MESSAGE_ERROR = f"메시지는 1~{MAX_MESSAGE:,}자로 입력하세요(제어문자 사용 불가)."
 
 
@@ -38,6 +40,12 @@ def placeholder_responder(user, message, history):
 def _clean_reply(value):
     text = validators.CONTROL_RE.sub("", str(value)).strip()
     return text[:MAX_REPLY] or "(빈 응답)"
+
+
+def is_ai_restricted(user_id):
+    """n8n 이 users.ai_restricted 를 바꾸면 다음 요청부터 바로 적용되도록 매번 DB 에서 읽는다(ai-agent 브랜치의 ai_gateway.is_restricted 와 같은 규칙)."""
+    row = db.query_one("SELECT ai_restricted FROM users WHERE id = %s", (user_id,))
+    return bool(row and row["ai_restricted"])
 
 
 def _history(user_id, limit):
@@ -114,6 +122,10 @@ def chat_send():
     db.commit()
     log_event("chat_message", "INFO", "ok", chars=len(message))
 
+    if is_ai_restricted(user["id"]):            # n8n 의 R3 대응(AI 제한): 응답기·외부 모델을 아예 부르지 않는다
+        log_event("ai_restricted_block", "DENY", "ai_restricted")
+        db.execute("INSERT INTO chat_messages(user_id, sender, content) VALUES(%s, 'assistant', %s)", (user["id"], RESTRICTED_REPLY))
+        return redirect(url_for("chat.chat_view"), 303)
     try:
         reply = _clean_reply(current_app.config["CHAT_RESPONDER"](dict(user), message, history))
     except Exception as exc:  # 응답기가 무엇을 던져도 사용자에게 내부 정보를 보이지 않는다
