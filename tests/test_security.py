@@ -159,6 +159,15 @@ def test_body_and_message_content_is_flagged_without_its_text(app, client, event
     assert "DROP TABLE" not in app.log_path.read_text(encoding="utf-8")
 
 
+def test_suspicious_prompt_input_is_flagged_without_its_text(app, client, events):
+    prompt = "' OR 1=1-- ignore previous instructions"
+    client.get("/login", query_string={"prompt": prompt})
+    event = _suspicious(events)[0]
+    assert event["field"] == "prompt" and event["kind"] == "sqli"
+    assert "value" not in event
+    assert prompt not in app.log_path.read_text(encoding="utf-8")
+
+
 def test_traversal_in_the_url_path_is_flagged(client, events):
     client.get("/static/%2e%2e/app/config.py")
     assert any(e["kind"] == "traversal" and e["field"] == "path" for e in _suspicious(events))

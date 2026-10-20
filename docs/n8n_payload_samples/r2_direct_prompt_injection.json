@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.1",
+  "action_level": "alert",
+  "rule": {
+    "id": "R2",
+    "stable_name": "DIRECT_PROMPT_INJECTION_BLOCKED",
+    "display_name": "[NEXUS][R2] 직접 Prompt Injection 차단"
+  },
+  "alert": {
+    "id": "01M59F7HBN0C4JDKPVYHJXMBE8",
+    "event_definition_id": "6ad5b4e09d0f6c101dafec4d",
+    "title": "[NEXUS][R2] 직접 Prompt Injection 차단",
+    "timestamp": "2026-10-19T06:57:42.510Z",
+    "priority": 3,
+    "key": "prompt_injection_detected|example_user|r2p-65b49e1a49"
+  },
+  "event": {
+    "event_type": "prompt_injection_detected",
+    "injection_type": "direct",
+    "decision": "DENY",
+    "pattern_id": "ignore_previous_instructions",
+    "source_type": "chat",
+    "source_component": "graylog_priority_test",
+    "request_id": "r2p-65b49e1a49",
+    "session_id": "opaque-session-r2-demo-001",
+    "user": "example_user",
+    "role": "employee",
+    "src_ip": "192.0.2.213",
+    "reason": "direct_prompt_injection",
+    "severity": "high"
+  }
+}

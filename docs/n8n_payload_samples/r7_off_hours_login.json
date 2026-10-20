@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.1",
+  "action_level": "observe",
+  "rule": {
+    "id": "R7",
+    "stable_name": "OFF_HOURS_LOGIN_SUCCESS",
+    "display_name": "[NEXUS][R7] 심야 로그인 성공"
+  },
+  "alert": {
+    "id": "01M593SQZHM91SJ47ZZ72YJJNH",
+    "event_definition_id": "6ad590929d0f6c101daf8edf",
+    "title": "[NEXUS][R7] 심야 로그인 성공",
+    "timestamp": "2026-10-18T23:29:59Z",
+    "priority": 1,
+    "key": "example_user|192.0.2.71"
+  },
+  "event": {
+    "event_type": "login_success",
+    "user": "example_user",
+    "src_ip": "192.0.2.71",
+    "decision": "ALLOW",
+    "severity": "info"
+  }
+}

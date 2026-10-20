@@ -11,10 +11,14 @@
 대화 내용은 DB(chat_messages)에만 저장하고 보안 로그에는 글자 수만 남긴다.
 n8n 이 users.ai_restricted=1 로 바꾼 사용자(R3 대응)는 다음 요청부터 응답기를 부르지 않고 제한 안내만 받는다.
 첨부 파일(chat_attach)은 저장하지 않고 뽑은 글자를 g.chat_attachment 로 응답기에 넘긴다(그 질문에만 쓰인다)."""
-from flask import Blueprint, current_app, g, redirect, render_template, request, url_for
+import re
+import secrets
+
+from flask import Blueprint, current_app, g, redirect, render_template, request, session, url_for
 
 from . import chat_attach, db, validators
 from .auth import login_required
+from .prompt_injection import detect_direct_prompt_injection
 from .security import ip_rate_limited, log_event
 
 bp = Blueprint("chat", __name__)
@@ -93,6 +97,24 @@ def chat_send():
         g.chat_attachment = attachment
         note = f"\n\n[첨부 파일: {attachment['name']}, {attachment['chars']:,}자{' (길어서 앞부분만)' if attachment['truncated'] else ''}]"
         log_event("chat_attachment", "INFO", "ok", ext=attachment["ext"], size=len(data), chars=attachment["chars"])
+
+    pattern_id = detect_direct_prompt_injection(message)
+    if pattern_id:
+        session_id = session.get("nexus_session_id")
+        if not isinstance(session_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{24,64}", session_id):
+            session_id = secrets.token_urlsafe(24)
+            session["nexus_session_id"] = session_id
+        log_event(
+            "prompt_injection_detected",
+            "DENY",
+            "direct_prompt_injection",
+            injection_type="direct",
+            source_type="chat",
+            pattern_id=pattern_id,
+            severity="high",
+            session_id=session_id,
+        )
+        return _render("보안 정책 위반 가능성이 있어 메시지를 차단했습니다.", 403)
 
     history = [{"sender": r["sender"], "content": r["content"]} for r in _history(user["id"], HISTORY_FOR_RESPONDER)]
     # 사용자 메시지는 응답을 기다리기 전에 먼저 확정한다(응답 생성이 실패·지연되어도 기록은 남는다).

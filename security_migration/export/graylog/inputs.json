@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "source_graylog_version": "6.1.16+4a05695",
+  "inputs": [
+    {
+      "key": "app_gelf_udp",
+      "title": "hping3 lab",
+      "type": "org.graylog2.inputs.gelf.udp.GELFUDPInput",
+      "global": false,
+      "node_selector": "single_node",
+      "configuration": {
+        "recv_buffer_size": 262144,
+        "port": 12201,
+        "number_worker_threads": 16,
+        "override_source": null,
+        "charset_name": "UTF-8",
+        "decompress_size_limit": 8388608,
+        "bind_address": "0.0.0.0"
+      }
+    },
+    {
+      "key": "wazuh_raw_udp",
+      "title": "Wazuh Alerts (JSON over UDP 5140)",
+      "type": "org.graylog2.inputs.raw.udp.RawUDPInput",
+      "global": true,
+      "node_selector": "global",
+      "configuration": {
+        "recv_buffer_size": 262144,
+        "port": 5140,
+        "number_worker_threads": 2,
+        "override_source": null,
+        "charset_name": "UTF-8",
+        "bind_address": "0.0.0.0"
+      }
+    }
+  ]
+}
