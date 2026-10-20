@@ -269,7 +269,7 @@ def d06(c):
 
     for s in SQLI:
         inspect(f"로그인 '{s[:14]}'", c.anon.login(s, s), (401,))
-        r = c.emp.get("/employees?" + urllib.parse.urlencode({"q": s}))
+        r = c.emp.get("/library/contacts?tab=company&" + urllib.parse.urlencode({"q": s}))
         inspect(f"직원검색 '{s[:14]}'", r, (200,))
         if "검색 결과가 없습니다" not in r.text:
             p.append(f"직원검색 '{s[:14]}': 결과가 비어 있지 않다(조건 우회 의심)")
@@ -297,7 +297,7 @@ def d07(c):
         c.emp.post("/approvals/new", {"title": s[:100], "body": s, "approver_1": str(c.db.uid(PROBE + "mgr"))}, token_from="/approvals/new")
     pages = ["/chat", "/boards/free", "/expenses", "/approvals"]
     html = "".join(c.emp.get(path).text for path in pages)
-    html += "".join(c.emp.get("/employees?" + urllib.parse.urlencode({"q": s})).text for s in XSS)
+    html += "".join(c.emp.get("/library/contacts?tab=company&" + urllib.parse.urlencode({"q": s})).text for s in XSS)
     post_id = re.search(r"/posts/(\d+)", c.emp.get("/boards/free").text)
     if post_id:
         html += c.emp.get(f"/posts/{post_id.group(1)}").text
@@ -309,30 +309,44 @@ def d07(c):
     return verdict(p, f"{len(XSS)}종 입력을 게시글·챗봇·경비·결재·검색에 넣어 4개 화면과 상세를 조회: 모두 글자로만 표시")
 
 
-@scenario("D08", "파일 업로드 우회")
+@scenario("D08", "파일 업로드 우회(제한 없이 받되 무해하게 처리)")
 def d08(c):
+    """첨부는 형식·개수·용량을 제한하지 않는다(사용자 결정 2026-10-19). 그래서 '거부하는가'가 아니라 '받은 뒤에도 무해한가'를 점검한다:
+    모두 무작위 이름으로 저장되고, 내려갈 때 항상 첨부+nosniff 이며, HTML·SVG 로 해석될 Content-Type 이 아니고, 그림·PDF 가 아닌 것은 인라인으로 열리지 않는다."""
     def count():
         return len(list(c.upload_dir.glob("*"))) if c.upload_dir.exists() else 0
-    before, p = count(), []
-    bad = [("shell.php", b"<?php system($_GET['c']); ?>"), ("shell.php.png", PNG), ("shell.png.php", PNG), ("page.html", b"<script>alert(1)</script>"),
-           (".htaccess", b"AddType application/x-httpd-php .png"), ("fake.png", b"<?php echo 1; ?>"), ("noext", b"hello"),
-           ("big.txt", b"a" * (2 * 1024 * 1024 + 100))]
-    for name, data in bad:
+    before, p, accepted = count(), [], 0
+    files = [("shell.php", b"<?php echo 1; ?>"), ("shell.php.png", PNG), ("shell.png.php", PNG), ("page.html", b"<script>alert(1)</script>"),
+             ("evil.svg", b"<svg xmlns='http://www.w3.org/2000/svg' onload='alert(1)'/>"), (".htaccess", b"AddType application/x-httpd-php .png"),
+             ("fake.png", b"<?php echo 1; ?>"), ("noext", b"hello"), ("big.txt", b"a" * (2 * 1024 * 1024 + 100))]
+    for name, data in files:
         r = c.emp.post("/boards/free/new", {"title": "업로드 시험", "body": "x"}, token_from="/boards/free/new", files={"attachment": (name, data)})
-        if r.status not in (400, 413, 0):
-            p.append(f"{name} → {r.status}")
-    if count() != before:
-        p.append("거부했어야 할 파일이 업로드 폴더에 저장됨")
-    r = c.emp.post("/boards/free/new", {"title": "정상 첨부", "body": "x"}, token_from="/boards/free/new", files={"attachment": ("정상.txt", b"hello")})
-    att = re.search(r"/attachments/(\d+)", c.emp.get(r.location).text) if r.status == 303 else None
-    if not att:
-        p.append(f"정상 파일 업로드 실패({r.status})")
-    else:
+        if r.status != 303:
+            p.append(f"{name} → {r.status}(제한이 없으므로 받아야 함)")
+            continue
+        accepted += 1
+        att = re.search(r"/attachments/(\d+)", c.emp.get(r.location).text)
+        if not att:
+            p.append(f"{name}: 첨부 링크가 글 화면에 없음")
+            continue
         d = c.emp.get(f"/attachments/{att.group(1)}")
         h = {k.lower(): v for k, v in d.headers.items()}
+        ctype = h.get("content-type", "")
         if d.status != 200 or not h.get("content-disposition", "").startswith("attachment") or h.get("x-content-type-options") != "nosniff":
-            p.append("다운로드가 첨부·nosniff 로 내려가지 않음")
-    return verdict(p, f"위험 파일 {len(bad)}종 거부(폴더 변화 없음), 정상 파일은 첨부·nosniff 로만 다운로드")
+            p.append(f"{name}: 다운로드가 첨부·nosniff 로 내려가지 않음")
+        if ctype.startswith(("text/html", "image/svg", "application/xhtml", "text/xml", "application/xml")):
+            p.append(f"{name}: Content-Type 이 {ctype} (브라우저가 문서로 해석할 위험)")
+        v = c.emp.get(f"/attachments/{att.group(1)}/view")
+        if v.status == 200 and not {k.lower(): x for k, x in v.headers.items()}.get("content-type", "").startswith(("image/png", "image/jpeg", "application/pdf")):
+            p.append(f"{name}: 그림·PDF 가 아닌데 인라인으로 열림")
+    # 프로필 사진은 첨부와 달리 그림만 받는다: 위험 파일은 400 으로 거부되고 upload_reject 이벤트가 남는다.
+    for name, data in (("shell.php", b"<?php echo 1; ?>"), ("fake.png", b"<html>not a png</html>"), ("page.html", b"<script>alert(1)</script>")):
+        r = c.emp.post("/account/photo", {}, token_from="/account/photo", files={"photo": (name, data)})
+        if r.status != 400:
+            p.append(f"프로필 사진 {name} → {r.status}(400 으로 거부돼야 함)")
+    if count() != before + accepted:
+        p.append(f"업로드 폴더 파일 수 변화 {count() - before}건(받은 {accepted}건과 불일치)")
+    return verdict(p, f"위험 파일 {len(files)}종(2MB 초과 포함)을 모두 받아 무작위 이름으로 저장, 전부 첨부·nosniff 로만 내려가고 HTML·SVG 로 해석되지 않으며 인라인 표시 없음. 프로필 사진은 그림만 받아 위험 파일 3종 거부")
 
 
 @scenario("D09", "경로 탐색·내부 파일 노출")
@@ -467,8 +481,9 @@ def d14(c):
 @scenario("D15", "웹 스캔(경로 탐색 도구 흉내)")
 def d15(c):
     codes = [c.anon.get("/" + path).status for path in SCAN_PATHS]
-    odd = [(path, code) for path, code in zip(SCAN_PATHS, codes) if code not in (404,)]
-    return verdict([f"{p} → {code}" for p, code in odd], f"흔한 관리·백업·설정 경로 {len(SCAN_PATHS)}개 모두 404(not_found 이벤트 생성)")
+    # /api/v1/* 는 메신저(nexus-messenger)용 토큰 인증 API 라서 실제로 있는 경로다. 토큰 없이 부르면 401 이 정상이고 내용은 새지 않는다.
+    odd = [(path, code) for path, code in zip(SCAN_PATHS, codes) if code != (401 if path.startswith("api/v1/") else 404)]
+    return verdict([f"{p} → {code}" for p, code in odd], f"흔한 관리·백업·설정 경로 {len(SCAN_PATHS)}개 모두 404(not_found 이벤트 생성), 메신저 API 경로는 토큰 없이 401")
 
 
 @scenario("D16", "속도 제한(로그인 IP·챗봇)")

@@ -1,5 +1,6 @@
 """포털 통합 테스트(문서함·기밀·직원 검색·게시판·첨부). Docker MySQL(nexus_test) 필요, 접속 불가면 skip."""
 import io
+import re
 
 import pytest
 
@@ -54,7 +55,7 @@ def count_posts(root, title):
 
 
 # ---------- 로그인 필수 ----------
-@pytest.mark.parametrize("path", ["/documents", "/documents/1", "/confidential", "/confidential/1", "/employees",
+@pytest.mark.parametrize("path", ["/documents", "/documents/1", "/confidential", "/confidential/1", "/library/contacts",
                                   "/boards/free", "/boards/notice", "/boards/free/new", "/posts/1", "/attachments/1",
                                   "/account/password"])
 def test_every_page_requires_login(aapp, path):
@@ -111,7 +112,7 @@ def test_confidential_content_never_leaks_through_general_paths(aapp, root):
     c = as_user(aapp, "zz_mgr")  # 기밀 권한이 있는 계정으로도 일반 경로에는 나오지 않아야 한다
     assert "zz_conf" not in c.get("/documents").get_data(as_text=True)
     assert "TOP-SECRET-BODY" not in c.get(f"/documents/{cid}").get_data(as_text=True)
-    assert "TOP-SECRET-BODY" not in c.get("/employees?q=zz_").get_data(as_text=True)
+    assert "TOP-SECRET-BODY" not in c.get("/library/contacts?tab=company&q=zz_").get_data(as_text=True)
 
 
 def test_nav_shows_confidential_link_only_to_privileged_roles(aapp):
@@ -120,25 +121,25 @@ def test_nav_shows_confidential_link_only_to_privileged_roles(aapp):
     assert "기밀 문서함" not in emp and "기밀 문서함" in mgr
 
 
-# ---------- 직원 검색 ----------
+# ---------- 직원 검색(주소록의 사내 직원 탭) ----------
 def test_employee_search_by_name_dept_and_title(aapp, root):
     add_employee(root, "zz_alpha", "영업팀", "사원")
     add_employee(root, "zzXalpha", "개발팀", "대리")
     add_employee(root, "zz_beta", "영업팀", "과장")
     c = as_user(aapp, "zz_emp")
-    html = c.get("/employees?q=zz_alpha").get_data(as_text=True)
+    html = c.get("/library/contacts?tab=company&q=zz_alpha").get_data(as_text=True)
     assert "zz_alpha" in html and "zzXalpha" not in html            # '_' 는 와일드카드가 아니라 문자 그대로
-    html = c.get("/employees?q=영업").get_data(as_text=True)
+    html = c.get("/library/contacts?tab=company&q=영업").get_data(as_text=True)
     assert "zz_alpha" in html and "zz_beta" in html and "zzXalpha" not in html
-    assert "zz_beta" in c.get("/employees?q=과장").get_data(as_text=True)
+    assert "zz_beta" in c.get("/library/contacts?tab=company&q=과장").get_data(as_text=True)
 
 
 def test_like_wildcards_are_literal(aapp, root):
     add_employee(root, "zz_one")
     add_employee(root, "zz_two")
     c = as_user(aapp, "zz_emp")
-    assert "검색 결과가 없습니다" in c.get("/employees?q=%25").get_data(as_text=True)      # q=%  → 전체 일치 아님
-    assert "검색 결과가 없습니다" in c.get("/employees?q=zz%25one").get_data(as_text=True)
+    assert "검색 결과가 없습니다" in c.get("/library/contacts?tab=company&q=%25").get_data(as_text=True)      # q=%  → 전체 일치 아님
+    assert "검색 결과가 없습니다" in c.get("/library/contacts?tab=company&q=zz%25one").get_data(as_text=True)
 
 
 def test_employee_search_sql_injection_returns_nothing(aapp, root):
@@ -146,24 +147,24 @@ def test_employee_search_sql_injection_returns_nothing(aapp, root):
     c = as_user(aapp, "zz_emp")
     short = ("' OR 1=1 -- ", "x' UNION SELECT username,2,3,4 FROM users-- ", "\\", "%' OR '%'='", "x') OR ('1'='1")
     for payload in short:  # 길이 한도(50자) 안의 페이로드는 검색어로만 취급되어 결과가 없다
-        r = c.get("/employees", query_string={"q": payload})
+        r = c.get("/library/contacts", query_string={"tab": "company", "q": payload})
         html = r.get_data(as_text=True)
         assert r.status_code == 200 and "zz_alpha" not in html and "argon2" not in html, payload
     long_payload = "zz' UNION SELECT username,password_hash,role,dept FROM users -- "
-    r = c.get("/employees", query_string={"q": long_payload})  # 50자를 넘으면 검증 단계에서 거부
+    r = c.get("/library/contacts", query_string={"tab": "company", "q": long_payload})  # 50자를 넘으면 검증 단계에서 거부
     assert r.status_code == 400 and "argon2" not in r.get_data(as_text=True)
 
 
 @pytest.mark.parametrize("q", ["a" * 51, "bad\x00char", "tab\tchar"])
 def test_employee_search_rejects_bad_queries_and_logs(aapp, events, q):
-    r = as_user(aapp, "zz_emp").get("/employees", query_string={"q": q})
+    r = as_user(aapp, "zz_emp").get("/library/contacts", query_string={"tab": "company", "q": q})
     assert r.status_code == 400
     ev = [e for e in events() if e["event_type"] == "input_rejected"][-1]
     assert ev["field"] == "q" and ev["decision"] == "DENY"
 
 
 def test_employee_search_echo_is_escaped(aapp):
-    html = as_user(aapp, "zz_emp").get("/employees", query_string={"q": '"><script>alert(1)</script>'}).get_data(as_text=True)
+    html = as_user(aapp, "zz_emp").get("/library/contacts", query_string={"tab": "company", "q": '"><script>alert(1)</script>'}).get_data(as_text=True)
     assert "<script" not in html
 
 
@@ -299,35 +300,141 @@ def test_upload_png_keeps_image_mime(aapp, root):
     assert d.headers["Content-Type"] == "image/png" and d.headers["Content-Disposition"].startswith("attachment")
 
 
-@pytest.mark.parametrize("filename,data,reason", [
-    ("shell.php", b"<?php system($_GET[0]); ?>", "extension_not_allowed"),
-    ("shell.php.png", PNG, "extension_not_allowed"),
-    ("shell.png.php", PNG, "extension_not_allowed"),
-    ("page.html", b"<script>alert(1)</script>", "extension_not_allowed"),
-    ("run.exe", b"MZ\x90\x00", "extension_not_allowed"),
-    ("noext", b"hello", "extension_not_allowed"),
-    (".htaccess", b"AddType x", "extension_not_allowed"),
-    ("fake.png", b"<?php system($_GET[0]); ?>", "content_mismatch"),
-    ("fake.pdf", PNG, "content_mismatch"),
-    ("bin.txt", b"a\x00b", "content_mismatch"),
-    ("empty.txt", b"", "empty_upload"),
-])
-def test_dangerous_uploads_are_rejected_without_side_effects(aapp, root, events, filename, data, reason):
-    c = as_user(aapp, "zz_emp")
-    r = new_post(c, "free", "zz_위험첨부", file=(filename, data))
-    assert r.status_code == 400
-    assert count_posts(root, "zz_위험첨부") == 0 and stored_files(aapp) == []   # 글도 파일도 남지 않는다
-    assert sql(root, "SELECT COUNT(*) FROM attachments")[0][0] == 0
-    ev = [e for e in events() if e["event_type"] == "upload_reject"][-1]
-    assert ev["reason"] == reason and ev["decision"] == "BLOCK" and ev["user"] == "zz_emp"
+# ---------- 첨부 미리보기(그림·PDF가 글 화면에서 보인다) ----------
+PDF = b"%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n"
 
 
-def test_oversized_upload_is_rejected(aapp, root, events):
+def test_image_attachment_is_shown_inline_on_the_post_page(aapp, root):
     c = as_user(aapp, "zz_emp")
-    r = new_post(c, "free", "zz_큰파일", file=("big.txt", b"a" * (2 * 1024 * 1024 + 10)))
+    r = new_post(c, "free", "zz_그림글", file=("사진.png", PNG))
+    att_id = sql(root, "SELECT id FROM attachments")[0][0]
+    page = as_user(aapp, "zz_emp2").get(r.headers["Location"]).get_data(as_text=True)
+    assert f'<img class="attach-img" src="/attachments/{att_id}/view"' in page          # 다른 직원도 바로 본다
+    assert f'href="/attachments/{att_id}"' in page                                       # 다운로드 링크는 그대로
+
+
+def test_image_view_is_inline_with_strict_headers(aapp, root):
+    c = as_user(aapp, "zz_emp")
+    new_post(c, "free", "zz_그림뷰", file=("사진.png", PNG))
+    att_id = sql(root, "SELECT id FROM attachments")[0][0]
+    d = as_user(aapp, "zz_emp2").get(f"/attachments/{att_id}/view")
+    assert d.status_code == 200 and d.data == PNG and d.headers["Content-Type"] == "image/png"
+    assert not d.headers.get("Content-Disposition", "").startswith("attachment")
+    assert d.headers["Content-Security-Policy"] == "default-src 'none'; sandbox"
+    assert d.headers["X-Content-Type-Options"] == "nosniff" and d.headers["X-Frame-Options"] == "DENY"
+    assert d.headers["Cross-Origin-Resource-Policy"] == "same-origin"
+
+
+def test_pdf_has_view_link_and_opens_inline_while_download_stays_attachment(aapp, root):
+    c = as_user(aapp, "zz_emp")
+    r = new_post(c, "free", "zz_pdf글", file=("문서.pdf", PDF))
+    att_id = sql(root, "SELECT id FROM attachments")[0][0]
+    page = c.get(r.headers["Location"]).get_data(as_text=True)
+    assert f'href="/attachments/{att_id}/view" target="_blank" rel="noopener"' in page
+    assert "<img" not in page.split("<h2>첨부</h2>")[1]                                   # PDF 는 그림으로 끼워 넣지 않는다
+    v = c.get(f"/attachments/{att_id}/view")
+    assert v.status_code == 200 and v.headers["Content-Type"] == "application/pdf"
+    assert not v.headers.get("Content-Disposition", "").startswith("attachment")
+    assert v.headers["Content-Security-Policy"] == "default-src 'none'" and v.headers["X-Frame-Options"] == "DENY"
+    assert c.get(f"/attachments/{att_id}").headers["Content-Disposition"].startswith("attachment")
+
+
+def test_text_attachment_has_no_inline_view_and_view_needs_login(aapp, root):
+    c = as_user(aapp, "zz_emp")
+    new_post(c, "free", "zz_텍스트글", file=("메모.txt", b"<html><script>alert(1)</script></html>"))
+    att_id = sql(root, "SELECT id FROM attachments")[0][0]
+    assert c.get(f"/attachments/{att_id}/view").status_code == 404                       # txt 는 다운로드만
+    assert c.get("/attachments/999999/view").status_code == 404
+    assert aapp.test_client().get(f"/attachments/{att_id}/view").status_code == 303      # 비로그인은 로그인 화면으로
+
+
+def test_post_form_loads_paste_script_from_own_origin_and_script_is_served(aapp):
+    c = as_user(aapp, "zz_emp")
+    page = c.get("/boards/free/new")
+    html = page.get_data(as_text=True)
+    assert 'src="/static/paste-attach.js"' in html and 'id="attachment"' in html and 'id="attach-preview"' in html
+    assert "script-src 'self'" in page.headers["Content-Security-Policy"]
+    js = c.get("/static/paste-attach.js")
+    assert js.status_code == 200 and b"clipboardData" in js.data
+
+
+# 첨부는 형식·개수·용량을 제한하지 않는다. 대신 어떤 파일이든 무해하게 다룬다: 무작위 이름으로 웹루트 밖에 저장하고, 항상 다운로드로만 내려주며,
+# 그림·PDF 는 내용이 맞을 때만 그 형식으로 인정한다(미리보기는 그 형식만).
+HARMLESS = [  # (파일 이름, 내용, 기대하는 분류)
+    ("shell.php", b"<?php echo 1; ?>", "application/octet-stream"),
+    ("shell.php.png", PNG, "image/png"),                                   # 이름은 이중 확장자지만 내용이 진짜 PNG 라서 그림으로 인정
+    ("shell.png.php", PNG, "application/octet-stream"),
+    ("page.html", b"<script>alert(1)</script>", "application/octet-stream"),
+    ("evil.svg", b"<svg xmlns='http://www.w3.org/2000/svg' onload='alert(1)'/>", "application/octet-stream"),
+    ("run.exe", b"MZ\x90\x00", "application/octet-stream"),
+    ("noext", b"hello", "application/octet-stream"),
+    (".htaccess", b"AddType application/x-httpd-php .png", "application/octet-stream"),
+    ("fake.png", b"<?php echo 1; ?>", "application/octet-stream"),   # 내용이 그림이 아니면 그림으로 인정하지 않는다
+    ("fake.pdf", PNG, "application/octet-stream"),
+    ("bin.txt", b"a\x00b", "text/plain"),
+    ("empty.txt", b"", "text/plain"),
+    ("<img src=x onerror=alert(1)>.zip", b"PK\x03\x04", "application/octet-stream"),
+]
+
+
+@pytest.mark.parametrize("filename,data,mime", HARMLESS)
+def test_any_file_is_accepted_but_handled_harmlessly(aapp, root, events, filename, data, mime):
+    c = as_user(aapp, "zz_emp")
+    r = new_post(c, "free", "zz_무해첨부", file=(filename, data))
+    assert r.status_code == 303
+    att_id, stored, orig, got_mime, size = sql(root, "SELECT id, stored_name, orig_name, mime, size FROM attachments")[0]
+    assert len(stored) == 36 and "." not in stored and stored_files(aapp) == [stored]            # 서버가 만든 이름으로 업로드 폴더에만
+    assert (aapp.config["UPLOAD_DIR"] / stored).read_bytes() == data and size == len(data)       # 내용은 그대로
+    assert got_mime == mime
+    assert re.fullmatch(r"[A-Za-z0-9._가-힣 -]+", orig) and not orig.startswith(".")           # 표시 이름은 안전한 문자만
+    other = as_user(aapp, "zz_emp2")
+    d = other.get(f"/attachments/{att_id}")                                                     # 내려받기: 항상 첨부 + nosniff
+    assert d.status_code == 200 and d.data == data and d.headers["Content-Disposition"].startswith("attachment")
+    assert d.headers["X-Content-Type-Options"] == "nosniff" and d.headers["Content-Type"].startswith(mime)
+    view = other.get(f"/attachments/{att_id}/view")                                             # 미리보기는 분류된 그림·PDF 만
+    assert view.status_code == (200 if mime in ("image/png",) else 404)
+    page = other.get(r.headers["Location"]).get_data(as_text=True)
+    assert "<script>alert(1)" not in page and "onerror=alert(1)>" not in page                  # 글 화면에서도 실행되는 조각이 없다
+
+
+def test_no_limit_on_size_or_count_for_attachments(aapp, root):
+    c = as_user(aapp, "zz_emp")
+    big = b"0123456789abcdef" * (512 * 1024)                                                    # 8MB: 예전 상한(2MB)의 네 배
+    assert new_post(c, "free", "zz_큰파일", file=("big.bin", big)).status_code == 303
+    sha, size = sql(root, "SELECT sha256, size FROM attachments")[0]
+    import hashlib
+    assert size == len(big) and sha == hashlib.sha256(big).hexdigest()
+    att = sql(root, "SELECT id FROM attachments")[0][0]
+    assert c.get(f"/attachments/{att}").data == big
+    files = [("attachment", (io.BytesIO(f"file{i}".encode()), f"f{i}.dat")) for i in range(15)]     # 한 글에 15개
+    data = {"title": "zz_많은첨부", "body": "x", "csrf_token": csrf_of(c)}
+    r = c.post("/boards/free/new", data={**data, "attachment": [f[1] for f in files]}, content_type="multipart/form-data")
+    assert r.status_code == 303
+    assert sql(root, "SELECT COUNT(*) FROM attachments WHERE post_id=(SELECT id FROM posts WHERE title='zz_많은첨부')")[0][0] == 15
+
+
+def test_requests_without_attachments_keep_the_body_size_limit(aapp, root, events):
+    """용량 제한을 푸는 것은 첨부를 받는 요청뿐이다. 로그인 같은 나머지 요청은 예전 상한(2MB)이 그대로다."""
+    c = aapp.test_client()
+    r = c.post("/login", data={"username": "zz_emp", "password": "x" * (3 * 1024 * 1024)})
     assert r.status_code == 413
-    assert count_posts(root, "zz_큰파일") == 0 and stored_files(aapp) == []
-    assert any(e["event_type"] == "request_rejected" and e["reason"] == "http_413" for e in events())
+
+
+def test_attachments_written_before_a_failure_are_removed(aapp, root, monkeypatch):
+    from app import uploads
+    real, calls = uploads.save_attachment, []
+
+    def flaky(directory, storage):
+        calls.append(1)
+        if len(calls) == 2:
+            raise RuntimeError("disk full")
+        return real(directory, storage)
+    monkeypatch.setattr(uploads, "save_attachment", flaky)
+    c = as_user(aapp, "zz_emp")
+    data = {"title": "zz_실패", "body": "x", "csrf_token": csrf_of(c), "attachment": [(io.BytesIO(b"a"), "a.dat"), (io.BytesIO(b"b"), "b.dat")]}
+    assert c.post("/boards/free/new", data=data, content_type="multipart/form-data").status_code == 500                      # 앱이 예외를 오류 화면(500)으로 처리하고 DB 는 롤백된다
+    assert stored_files(aapp) == []                                                                # 첫 파일도 지워진다
+    assert count_posts(root, "zz_실패") == 0 and sql(root, "SELECT COUNT(*) FROM attachments")[0][0] == 0
 
 
 def test_path_in_uploaded_filename_cannot_escape(aapp, root):
@@ -364,3 +471,29 @@ def test_post_with_wrong_board_slug_in_form_cannot_bypass_notice_rule(aapp, root
     r = c.post("/boards/free/new", data={"title": "zz_우회", "body": "x", "board": "notice", "csrf_token": csrf_of(c)})
     assert r.status_code == 303
     assert sql(root, "SELECT board FROM posts WHERE title='zz_우회'")[0][0] == "free"
+
+
+def test_unreadable_stored_file_is_a_clean_404_not_a_server_error(aapp, root, events, monkeypatch):
+    """업로드가 자유로우니 서버의 백신이 파일을 격리하는 일이 생길 수 있다(운영체제가 열지 못하게 함). 그때 500 이 아니라 404 로 답하고 기록한다."""
+    from app import uploads
+    c = as_user(aapp, "zz_emp")
+    new_post(c, "free", "zz_격리", file=("a.dat", b"payload"))
+    att_id = sql(root, "SELECT id FROM attachments")[0][0]
+
+    def deny(*args, **kwargs):
+        raise OSError(22, "Invalid argument")                     # Windows 에서 백신이 격리한 파일을 열 때의 오류
+    monkeypatch.setattr(uploads, "send_from_directory", deny)
+    r = c.get(f"/attachments/{att_id}")
+    assert r.status_code == 404 and b"Traceback" not in r.data
+    assert any(e["event_type"] == "attachment_unreadable" and e["reason"] == "OSError" and e["errno"] == 22 for e in events())
+
+
+def test_old_employee_search_address_moves_to_the_address_book(aapp, root):
+    c = as_user(aapp, "zz_emp")
+    r = c.get("/employees?q=영업")
+    assert r.status_code == 301 and r.headers["Location"].endswith("/library/contacts?tab=company&q=%EC%98%81%EC%97%85")
+    assert c.get("/employees").headers["Location"].endswith("/library/contacts?tab=company")
+    anon = aapp.test_client().get("/employees")
+    assert anon.status_code == 303 and "/login" in anon.headers["Location"]
+    for entry in ("직원 검색",):
+        assert entry not in c.get("/").get_data(as_text=True)                                  # 메뉴에 따로 남아 있지 않다

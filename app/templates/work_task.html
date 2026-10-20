@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}{{ t.title }} · 업무 · NEXUS WORK{% endblock %}
+{% block content %}
+<a class="crumb" href="{{ url_for('work.task_list') }}">&larr; 업무 관리</a>
+<h1>{{ t.title }}</h1>
+{% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+<div class="sheet">
+  <table class="kv">
+    <tbody>
+      <tr><th>상태</th><td><span class="tk tk-{{ t.status }}">{{ statuses[t.status] }}</span></td></tr>
+      <tr><th>담당자</th><td>{{ t.assignee }} <span class="hint">({{ t.assignee_dept }})</span></td></tr>
+      <tr><th>요청자</th><td>{{ t.creator }}</td></tr>
+      <tr><th>우선순위</th><td><span class="prio prio-{{ t.priority }}">{{ priorities[t.priority] }}</span></td></tr>
+      <tr><th>마감일</th><td>{% if t.due_date %}{{ t.due_date.strftime('%Y-%m-%d') }}{% if overdue %} <span class="flag">지연</span>{% endif %}{% else %}-{% endif %}</td></tr>
+      <tr><th>프로젝트</th><td>{% if t.project %}<a href="{{ url_for('work.project_detail', project_id=t.project_id) }}">{{ t.project }}</a>{% else %}-{% endif %}</td></tr>
+      <tr><th>등록</th><td>{{ t.created_at.strftime('%Y-%m-%d %H:%M') }}{% if t.completed_at %} · 완료 {{ t.completed_at.strftime('%Y-%m-%d %H:%M') }}{% endif %}</td></tr>
+    </tbody>
+  </table>
+  {% if t.description %}<h2>내용</h2><p class="prewrap">{{ t.description }}</p>{% endif %}
+  {% if allowed %}
+  <div class="actions">
+    {% for s in allowed %}
+    <form method="post" action="{{ url_for('work.task_status', task_id=t.id) }}" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="status" value="{{ s }}">
+      <button type="submit" class="btn{{ ' primary' if s == 'done' else (' danger' if s == 'cancelled' else '') }}">{{ {'todo': '할 일로 되돌리기', 'doing': '진행 시작' if t.status == 'todo' else '다시 진행', 'done': '완료 처리', 'cancelled': '취소'}[s] }}</button>
+    </form>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% if members %}
+  <form method="post" action="{{ url_for('work.task_assign', task_id=t.id) }}" class="inline-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>담당자 변경
+      <select name="assignee_id">{% for m in members %}<option value="{{ m.id }}"{% if m.id == t.assignee_id %} selected{% endif %}>{{ m.display_name }} ({{ m.dept }})</option>{% endfor %}</select>
+    </label>
+    <button type="submit" class="btn">변경</button>
+  </form>
+  {% endif %}
+</div>
+<div class="sheet" id="comments">
+  <h2>댓글 ({{ comments|length }})</h2>
+  {% for c in comments %}
+  <div class="comment"><strong>{{ c.display_name }}</strong> <span class="hint">{{ c.created_at.strftime('%Y-%m-%d %H:%M') }}</span><p class="prewrap">{{ c.body }}</p></div>
+  {% else %}
+  <p class="hint">댓글이 없습니다.</p>
+  {% endfor %}
+  <form method="post" action="{{ url_for('work.task_comment', task_id=t.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>댓글 쓰기 <textarea name="body" rows="3" maxlength="1000" required></textarea></label>
+    <div class="actions"><button type="submit" class="btn primary">등록</button></div>
+  </form>
+</div>
+{% endblock %}

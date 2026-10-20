@@ -5,7 +5,8 @@ from flask import Blueprint, abort, g, redirect, render_template, request, url_f
 from . import db, validators
 from .approvals import (APPROVER_MESSAGES, MAX_STEPS, approver_candidates, conflict, create_approval, forbidden,
                         parse_approvers)
-from .auth import login_required, role_required
+from .auth import login_required
+from .permissions import can, permission_required
 from .security import log_event
 
 bp = Blueprint("erp", __name__)
@@ -23,7 +24,7 @@ def _can_access(owner_id, owner_dept):
 @login_required
 def payroll_list():
     u = g.user
-    if u["role"] == "admin":
+    if can(u, "payroll.all"):
         rows = db.query_all("SELECT id, user_id, pay_month, base_salary, bonus FROM payroll "
                             "ORDER BY pay_month DESC, user_id LIMIT 200", conf=True)
     elif u["role"] == "manager":
@@ -46,7 +47,7 @@ def payroll_detail(pay_id):
     if not row:
         abort(404)
     owner = db.query_one("SELECT id, display_name, dept FROM users WHERE id = %s", (row["user_id"],))
-    if not owner or not _can_access(owner["id"], owner["dept"]):
+    if not owner or not (can(g.user, "payroll.all") or _can_access(owner["id"], owner["dept"])):
         return forbidden("out_of_scope", resource=f"payroll:{pay_id}")
     log_event("confidential_access", "ALLOW", "read", resource=f"payroll:{pay_id}")
     return render_template("payroll_detail.html", p=row, owner=owner)
@@ -54,7 +55,7 @@ def payroll_detail(pay_id):
 
 # ---------- 재무 보고(기밀) ----------
 @bp.get("/finance")
-@role_required("manager", "admin")
+@permission_required("finance.view")
 def finance_list():
     rows = db.query_all("SELECT id, report_month, title, created_at FROM financial_reports "
                         "ORDER BY report_month DESC, id DESC", conf=True)
@@ -63,7 +64,7 @@ def finance_list():
 
 
 @bp.get("/finance/<int:report_id>")
-@role_required("manager", "admin")
+@permission_required("finance.view")
 def finance_report(report_id):
     row = db.query_one("SELECT id, report_month, title, body, created_at FROM financial_reports WHERE id = %s",
                        (report_id,), conf=True)

@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}사용자 등록 · NEXUS WORK{% endblock %}
+{% block content %}
+<a class="crumb" href="{{ url_for('admin.users') }}">&larr; 사용자 관리</a>
+<h1>사용자 등록</h1>
+<div class="sheet narrow">
+  {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+  <p class="hint">임시 비밀번호는 등록 직후 한 번만 화면에 보입니다. 사용자는 처음 로그인한 뒤 비밀번호를 바꾸세요. 인사카드(사번·입사일)도 함께 만들어집니다.</p>
+  <form method="post" action="{{ url_for('admin.user_new') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>아이디 (영문 소문자로 시작, 3~32자)
+      <input name="username" required maxlength="32" pattern="[a-z][a-z0-9_]{2,31}" value="{{ values.get('username', '') }}" autocomplete="off">
+    </label>
+    <label>이름
+      <input name="display_name" required maxlength="64" value="{{ values.get('display_name', '') }}">
+    </label>
+    <label>부서
+      <input name="dept" required maxlength="64" value="{{ values.get('dept', '') }}">
+    </label>
+    <label>역할
+      <select name="role" required>
+        {% for r in roles %}<option value="{{ r }}"{% if values.get('role', 'employee') == r %} selected{% endif %}>{{ r }} ({{ titles[r] }})</option>{% endfor %}
+      </select>
+    </label>
+    <label>직급 (비우면 역할의 기본 직급)
+      <select name="title">
+        <option value="">기본</option>
+        {% for t in ranks %}<option value="{{ t }}"{% if values.get('title') == t %} selected{% endif %}>{{ t }}</option>{% endfor %}
+      </select>
+    </label>
+    <p class="hint">직급은 역할에 맞아야 합니다(직원=사원·대리·과장, 팀장=팀장, 관리자=관리자). 부서가 <strong>{{ security_team }}</strong>이면 선택한 역할과 상관없이 최상위 권한(관리자)으로 고정됩니다.</p>
+    <div class="actions"><button type="submit" class="btn primary">등록</button></div>
+  </form>
+</div>
+{% endblock %}

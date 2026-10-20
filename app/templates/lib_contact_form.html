@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}연락처 추가 · NEXUS WORK{% endblock %}
+{% block content %}
+<a class="crumb" href="{{ url_for('library.contact_list', tab='mine') }}">&larr; 주소록</a>
+<h1>연락처 추가</h1>
+<div class="sheet narrow">
+  {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+  <form method="post" action="{{ url_for('library.contact_new') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>이름 <input name="name" required maxlength="60" value="{{ values.get('name', '') }}"></label>
+    <label>회사 <input name="company" maxlength="80" value="{{ values.get('company', '') }}"></label>
+    <label>직책 <input name="title" maxlength="60" value="{{ values.get('title', '') }}"></label>
+    <label>전화 <input name="phone" maxlength="30" inputmode="tel" value="{{ values.get('phone', '') }}"></label>
+    <label>이메일 <input name="email" maxlength="120" inputmode="email" value="{{ values.get('email', '') }}"></label>
+    <label>메모 <input name="memo" maxlength="200" value="{{ values.get('memo', '') }}"></label>
+    <label class="check"><input type="checkbox" name="shared" value="1"{% if values.get('shared') %} checked{% endif %}> 전 직원에게 공유</label>
+    <p class="hint">전화번호나 이메일 중 하나는 꼭 입력하세요. 공유하지 않으면 나만 볼 수 있습니다.</p>
+    <div class="actions"><button type="submit" class="btn primary">저장</button></div>
+  </form>
+</div>
+{% endblock %}

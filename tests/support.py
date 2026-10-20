@@ -8,7 +8,8 @@ PW = "Zz-Test-Pass-2026!"
 PW_HASH = PasswordHasher().hash(PW)
 # (아이디, 역할, 부서): A팀·B팀으로 나눠 팀 범위 검사를 시험할 수 있게 한다
 USERS = (("zz_emp", "employee", "A팀"), ("zz_emp2", "employee", "A팀"), ("zz_emp3", "employee", "B팀"),
-         ("zz_mgr", "manager", "A팀"), ("zz_mgrb", "manager", "B팀"), ("zz_adm", "admin", "관리팀"))
+         ("zz_mgr", "manager", "A팀"), ("zz_mgrb", "manager", "B팀"), ("zz_adm", "admin", "관리팀"),
+         ("zz_sec", "admin", "보안관제팀"))
 
 _ZZ = "(SELECT id FROM users WHERE username LIKE 'zz\\_%')"
 
@@ -22,6 +23,19 @@ def connect_root():
 def cleanup(con):
     with con.cursor() as cur:
         cur.execute("DELETE FROM security_auth_events WHERE username LIKE 'zz\\_%'")
+        # 업무·자료: 외래 키 순서대로(하위 폴더가 나중에 만들어지므로 id 역순으로 지운다)
+        cur.execute(f"DELETE FROM lib_files WHERE uploaded_by IN {_ZZ} OR deleted_by IN {_ZZ}")
+        cur.execute(f"DELETE FROM lib_folders WHERE created_by IN {_ZZ} ORDER BY id DESC")
+        cur.execute(f"DELETE FROM lib_forms WHERE uploaded_by IN {_ZZ}")
+        cur.execute(f"DELETE FROM contacts WHERE owner_id IN {_ZZ}")
+        cur.execute(f"DELETE FROM task_comments WHERE user_id IN {_ZZ}")
+        cur.execute(f"DELETE FROM tasks WHERE creator_id IN {_ZZ} OR assignee_id IN {_ZZ}")
+        cur.execute(f"DELETE FROM projects WHERE owner_id IN {_ZZ}")
+        cur.execute(f"DELETE FROM events WHERE owner_id IN {_ZZ}")
+        cur.execute(f"DELETE FROM reservations WHERE user_id IN {_ZZ}")
+        cur.execute("DELETE FROM resources WHERE name LIKE 'zz%'")
+        cur.execute(f"DELETE FROM leave_requests WHERE user_id IN {_ZZ} OR decided_by IN {_ZZ}")
+        cur.execute(f"DELETE FROM attendance WHERE user_id IN {_ZZ}")
         cur.execute(f"DELETE FROM posts WHERE author_id IN {_ZZ}")
         cur.execute(f"DELETE FROM approval_steps WHERE approver_id IN {_ZZ} "
                     f"OR approval_id IN (SELECT id FROM approvals WHERE requester_id IN {_ZZ})")

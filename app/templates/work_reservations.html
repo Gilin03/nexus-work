@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}회의실·비품 예약 · NEXUS WORK{% endblock %}
+{% block content %}
+<h1>회의실·비품 예약</h1>
+{% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+<p class="actions">
+  <a class="btn" href="{{ url_for('work.reservation_list', date=prev, kind=kind) }}" aria-label="전날">&lt;</a>
+  <strong class="cal-title">{{ day.strftime('%Y-%m-%d') }} ({{ ['월', '화', '수', '목', '금', '토', '일'][day.weekday()] }})</strong>
+  <a class="btn" href="{{ url_for('work.reservation_list', date=next, kind=kind) }}" aria-label="다음날">&gt;</a>
+  <a class="btn" href="{{ url_for('work.reservation_list', kind=kind) }}">오늘</a>
+  <a class="chip{{ '' if kind else ' on' }}" href="{{ url_for('work.reservation_list', date=day.isoformat()) }}">전체</a>
+  {% for key, label in kinds.items() %}<a class="chip{{ ' on' if kind == key else '' }}" href="{{ url_for('work.reservation_list', date=day.isoformat(), kind=key) }}">{{ label }}</a>{% endfor %}
+</p>
+<div class="sheet">
+  {% if resources %}
+  <div class="scroll">
+    <table>
+      <thead><tr><th>자원</th><th>위치·정원</th><th>이 날의 예약</th><th></th></tr></thead>
+      <tbody>
+      {% for r in resources %}
+        <tr>
+          <td><strong>{{ r.name }}</strong><br><span class="hint">{{ kinds[r.kind] }}{% if not r.active %} · 사용 중지{% endif %}</span></td>
+          <td>{{ r.location }}{% if r.capacity %}<br><span class="hint">{{ r.capacity }}명</span>{% endif %}</td>
+          <td>
+            {% for b in by_res.get(r.id, []) %}
+            <div class="slot{{ ' mine' if b.user_id == me else '' }}">
+              <span class="num">{{ b.start_at.strftime('%H:%M') }}~{{ b.end_at.strftime('%H:%M') }}</span> {{ b.display_name }} <span class="hint">{{ b.purpose }}</span>
+              {% if b.user_id == me or is_admin %}
+              <form method="post" action="{{ url_for('work.reservation_cancel', reservation_id=b.id) }}" class="inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn small">취소</button>
+              </form>
+              {% endif %}
+            </div>
+            {% else %}
+            <span class="hint">예약 없음</span>
+            {% endfor %}
+          </td>
+          <td>
+            {% if r.active %}<a class="btn primary" href="{{ url_for('work.reservation_new', resource_id=r.id, date=day.isoformat()) }}">예약</a>{% endif %}
+            {% if is_admin %}
+            <form method="post" action="{{ url_for('work.resource_toggle', resource_id=r.id) }}" class="inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn small">{{ '사용 중지' if r.active else '다시 사용' }}</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="hint">등록된 자원이 없습니다.</p>
+  {% endif %}
+</div>
+<div class="sheet">
+  <h2>내 예약</h2>
+  {% if mine %}
+  <ul class="plain">
+    {% for m in mine %}<li>{{ m.start_at.strftime('%Y-%m-%d %H:%M') }}~{{ m.end_at.strftime('%H:%M') }} · {{ m.resource }} <span class="hint">{{ m.purpose }}</span>
+      <form method="post" action="{{ url_for('work.reservation_cancel', reservation_id=m.id) }}" class="inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn small">취소</button>
+      </form></li>{% endfor %}
+  </ul>
+  {% else %}
+  <p class="hint">예정된 예약이 없습니다.</p>
+  {% endif %}
+</div>
+{% if is_admin %}
+<div class="sheet">
+  <h2>자원 추가 (관리자)</h2>
+  <form method="post" action="{{ url_for('work.resource_new') }}" class="grid-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>이름 <input name="name" required maxlength="60"></label>
+    <label>구분 <select name="kind">{% for key, label in kinds.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></label>
+    <label>위치 <input name="location" maxlength="60"></label>
+    <label>수용 인원 <input name="capacity" inputmode="numeric" maxlength="3"></label>
+    <label>설명 <input name="description" maxlength="200"></label>
+    <div class="actions"><button type="submit" class="btn primary">추가</button></div>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

@@ -8,11 +8,14 @@
 
 | 구분 | 기능 |
 |---|---|
-| 그룹웨어 | 로그인·로그아웃, 문서함(일반/기밀), 직원 검색, 공지사항·자유게시판(첨부 업로드), 전자결재, 비밀번호 변경 |
+| 그룹웨어 | 로그인·로그아웃, 문서함(일반/기밀), 공지사항·자유게시판(첨부 업로드, 그림·PDF 붙여넣기와 글 화면 미리보기), 전자결재, 비밀번호 변경, 프로필 사진(올리기·바꾸기·지우기, 상단바 아바타) |
 | ERP | 급여(본인·팀·전체 범위), 경비 등록·상신, 재무 보고(기밀) |
-| 전자결재 | 상신자가 정하는 순차 결재선(최대 5명), 승인·반려(사유 필수), 상신 철회, 결재란 화면 |
+| 업무 | 업무 관리(할 일: 담당자·마감·우선순위·상태 전이·댓글·요청한 업무·팀 업무), 일정(월간 달력, 공개 범위 나만·팀·전사, 참석자, 승인된 휴가와 내 업무 마감 표시), 회의실·비품 예약(30분 단위, 겹침 차단), 프로젝트(구성원·업무·진척률) |
+| 자료 | 자료실(폴더형, 전사·부서 공개, 파일 버전 이력, 형식·개수·용량 제한 없음), 주소록(사내 직원·공유 연락처·내 연락처), 문서 검색(문서함·게시판·결재·자료실·양식·업무·연락처를 권한 범위 안에서 한 번에), 양식 서식 모음(관리자 서식 파일 + 전자결재 양식 바로가기) |
+| 인사(HR) | 인사카드(사번·입사일·근속·연차), 조직도, 근태관리(출퇴근·지각 표시), 휴가관리(연차·반차·병가 신청, 팀장·관리자 승인·반려, 취소) |
+| 전자결재 | 공문 양식 화면(기관명·문서번호·결재란·제목·시행일자·기안·수신·참조·본문·붙임·끝·발신 명의, 인쇄 가능)과 서식 편집기(글자 크기·색·배경·정렬·제목·목록, 표 삽입·행/열 추가·칸 합치기), 양식 5종(일반 기안·업무 협조·출장 신청·구매 요청·**지출결의서**)과 문서번호, 긴급 표시, 상신자가 정하는 순차 결재선(최대 5명), 참조자, 첨부(상신할 때와 결재자가 승인·반려할 때, 개수·형식·용량 제한 없음, 단계별로 구분 표시), 승인 의견·반려 사유, 상신 철회, 재기안, 문서함(기안함·결재 대기·결재 예정·처리 완료·참조함)과 메뉴의 결재 대기 건수, 결재란 화면 |
 | AI 어시스턴트 | 대화 화면과 본인 대화 기록. 응답 생성부는 교체 가능한 접점(`CHAT_RESPONDER`)이고 기본값은 시험 응답 |
-| 관리자 | 사용자 목록, 역할 변경, 잠금 해제 |
+| 관리(시스템 관리) | 관리 현황(사용자·잠금·결재·휴가·출근·최근 보안 이벤트), 사용자 관리(등록·역할·**직급** 변경·비밀번호 초기화·잠금·잠금 해제, **보안관제팀·시스템관리자는 최상위 권한 고정**), **보안 대시보드**(요약 지표·시간/일별 추이 그래프·위협 지표·상위 IP/계정/의심 입력·잠긴 계정·필터·상세·CSV 내보내기, 보안관제팀·시스템관리자 전용), 권한 현황(직급별·팀별·역할별 권한표와 고정 계정) |
 | 보안 로그 | 모든 보안 이벤트를 JSON 한 줄로 `logs/security.jsonl`에 기록(탐지 담당이 수집) |
 | 메신저 연동 | 별도 네이티브 앱(nexus-messenger)이 토큰으로 로그인해 1:1·그룹 채팅하는 `/api/v1/*` API + Socket.IO 실시간 전송. 자세히는 [docs/02_메신저_API.md](docs/02_메신저_API.md) |
 
@@ -25,7 +28,7 @@
 | 세션 | HttpOnly·SameSite=Lax, 유휴 30분·절대 8시간, 로그아웃·비밀번호 변경 시 이전 쿠키 전부 무효화 |
 | 인가 | 서버에서 역할·소유자·팀 범위 검사, 사용자·역할·잠금은 요청마다 DB 재조회, `/admin/*` 블루프린트 단위 보호 |
 | 출력 | 자동 이스케이프(끄지 않음), CSP(인라인 스크립트·스타일 불가), nosniff, X-Frame-Options |
-| 업로드 | 확장자 허용목록 + 내용 확인, 웹루트 밖 저장, 무작위 파일명, 항상 첨부로만 다운로드 |
+| 업로드 | **게시판·결재 첨부는 형식·개수·용량 제한이 없다**(2026-10-19 사용자 결정). 대신 무해하게 다룬다: 무작위 파일명으로 웹루트 밖에 조각 단위로 저장(메모리에 통째로 올리지 않음), 이름은 안전한 문자만, 형식은 거부하지 않고 분류만(그림·PDF는 내용이 맞을 때만 인정, 나머지는 일반 바이너리), 읽을 수 없는 파일(백신 격리 등)은 404. 프로필 사진만 png·jpg + 내용 확인과 2MB 상한이 그대로다. 다운로드는 항상 첨부로, 그림(png·jpg)·PDF만 별도 미리보기 경로(`/attachments/<id>/view`)로 인라인 표시(경로 전용 CSP `default-src 'none'`, nosniff, 로그인 필요) |
 | DB 권한 | 일반 표는 `nexus_app`(필요한 열만 UPDATE), 기밀 표(기밀 문서·급여·재무)는 `nexus_conf`(읽기 전용) |
 | 결재 | 순차 결재·종결 상태 불변·자기 승인 금지(앱 + DB 트리거), 결재선 열은 앱 계정이 수정 불가 |
 | 로그 | 표준 필드의 JSON, 비밀번호·대화 내용 미기록, 의심 입력(`suspicious_input`)은 차단 없이 기록 |
@@ -41,6 +44,7 @@
 cp .env.example .env
 #    .env 를 열어 MYSQL_ROOT_PASSWORD, NEXUS_APP_PASSWORD, NEXUS_CONF_PASSWORD, SECRET_KEY 를 임의의 긴 값으로 바꿉니다.
 #    예: python -c "import secrets; print(secrets.token_urlsafe(32))"
+#    LAB_INTERNAL_API_TOKEN(기밀 문서에 들어가는 실습용 토큰)은 팀 채팅으로 받은 값을 넣습니다(만드는 법은 .env.example).
 
 # 2) MySQL 컨테이너 (호스트 127.0.0.1:3307, 최초 1회 스키마·계정이 자동 생성됩니다)
 docker compose up -d
@@ -53,11 +57,13 @@ pip install -r requirements.txt
 # 4) 시험 데이터 넣기(계정 6개, 문서·급여·경비·결재)
 python scripts/seed.py --db nexus
 
-# 5) 실행 — http://127.0.0.1:5070
+# 5) 실행 — 기본은 http://127.0.0.1:5070 (내 PC만)
 python run.py
 ```
 
 기본 포트가 다르거나 PC의 다른 MySQL과 겹치면 `.env`의 `DB_PORT`를 바꿉니다(컨테이너 내부 포트는 3306 그대로입니다).
+
+다른 장비(네트워크 담당 장비·Kali)에서 접속하게 하려면 `.env`의 `APP_HOST`를 `0.0.0.0`으로 바꿔 실행합니다(포트는 `APP_PORT`, 기본 5070). 이 PC의 주소, 방화벽, 확인 방법은 [docs/03_팀_연동안내.md](docs/03_팀_연동안내.md)에 있습니다.
 
 ### 시험 계정
 
@@ -69,12 +75,14 @@ python run.py
 | choi | 팀장 | 개발팀 |
 | admin | 관리자 | 경영지원팀 |
 
-비밀번호는 `.env`의 `SEED_KIM_PW`(kim·han·park), `SEED_LEE_PW`(lee·choi), `SEED_ADMIN_PW`(admin)입니다. 기본값은 `.env.example`에 있는 시험용 값이며, 공유 환경에서는 바꾸세요.
+비밀번호는 `.env`의 `SEED_KIM_PW`(kim·han·park), `SEED_LEE_PW`(lee·choi), `SEED_ADMIN_PW`(admin)입니다. 기본값은 `.env.example`에 있는 시험용 값이며, 공유 환경에서는 바꾸세요(외부 주소로 띄울 때 예시 값 그대로면 `run.py`가 경고합니다).
+
+기밀 문서(팀장·관리자만 열람)에는 시나리오용 식별 문구(`NXC-…`)가 들어 있고, `M&A_PLAN`에는 실습용 내부 API 토큰도 들어 있습니다. 자세한 내용은 [docs/03_팀_연동안내.md](docs/03_팀_연동안내.md) 2절에 있습니다.
 
 ## 테스트와 점검
 
 ```bash
-python -m pytest -q                                   # 전체 자동 시험(453개, MySQL 컨테이너 필요)
+python -m pytest -q                                   # 전체 자동 시험(1202개, MySQL 컨테이너 필요)
 python scripts/defense_check.py --report 결과.md      # 방어 점검 18항목(서버를 띄운 상태에서, 루프백만 허용)
 python scripts/red_team_extra.py --report 결과2.md    # 추가 공격 패턴 20항목(같은 전제, SSTI·동시성 경쟁 등)
 ```
@@ -85,16 +93,18 @@ python scripts/red_team_extra.py --report 결과2.md    # 추가 공격 패턴 2
 ## 폴더 구조
 
 ```
-app/            Flask 앱 (auth, portal, erp, approvals, admin, chat, messenger_api, realtime, security, db, validators, uploads)
+app/            Flask 앱 (auth, portal, erp, hr, profile, audit, richtext(결재 본문 살균기), approvals, admin, chat, messenger_api, realtime, security, db, validators, uploads)
   templates/    화면    static/  스타일(CSP 때문에 외부 글꼴·인라인 스타일 없음)
 db/             schema.sql, grants.sql(최소권한), init.sh(컨테이너 최초 기동 때 실행)
-scripts/        seed.py(시험 데이터), defense_check.py·red_team_extra.py(방어 점검)
+scripts/        seed.py(시험 데이터), migrate_hr.py·migrate_approval.py·migrate_work.py·migrate_security.py(이미 있는 DB 에 인사·전자결재·업무·자료 확장과 권한 고정·직급 권한 추가), create_team_admins.py, defense_check.py·red_team_extra.py(방어 점검)
 tests/          pytest 시험
-docs/           설계·검증·트러블슈팅·메신저 API 문서
-run.py          개발·시연용 실행(서버 버전 비노출, 기본 루프백, Socket.IO 포함)
+docs/           설계·검증·트러블슈팅·메신저 API·팀 연동 안내 문서
+run.py          개발·시연용 실행(서버 버전 비노출, 기본 루프백 — .env 의 APP_HOST 로 변경, Socket.IO 포함)
 ```
 
 ## 다른 담당과 맞닿는 곳
+
+다른 담당에게 넘겨주는 내용(포털 주소·포트, 시나리오 데이터, 이후 DB 대응 열·n8n 계정 등)은 [docs/03_팀_연동안내.md](docs/03_팀_연동안내.md)에 모아 둡니다.
 
 - **탐지(Wazuh·Graylog):** `logs/security.jsonl`의 이벤트와 필드는 [실측_검증계획_A.md 4절](docs/실측_검증계획_A.md)에 정리되어 있습니다.
 - **AI·Gateway:** `app.config["CHAT_RESPONDER"]`를 `responder(user, message, history) -> str`로 교체해 연결합니다. 챗봇의 권한은 현재 로그인한 사용자를 넘을 수 없습니다([app/chat.py](app/chat.py) 머리말).
@@ -108,4 +118,4 @@ run.py          개발·시연용 실행(서버 버전 비노출, 기본 루프�
 
 ## 문서
 
-[docs/01_기획.md](docs/01_기획.md) · [docs/02_메신저_API.md](docs/02_메신저_API.md) · [docs/검증안내서.md](docs/검증안내서.md) · [docs/실측_검증계획_A.md](docs/실측_검증계획_A.md) · [docs/검증결과_A_2026-10-17.md](docs/검증결과_A_2026-10-17.md) · [docs/트러블슈팅.md](docs/트러블슈팅.md) · [VULN-FINDINGS.md](VULN-FINDINGS.md) · [작업내역_체크리스트.md](작업내역_체크리스트.md)
+[docs/01_기획.md](docs/01_기획.md) · [docs/02_메신저_API.md](docs/02_메신저_API.md) · [docs/03_팀_연동안내.md](docs/03_팀_연동안내.md) · [docs/검증안내서.md](docs/검증안내서.md) · [docs/실측_검증계획_A.md](docs/실측_검증계획_A.md) · [docs/검증결과_A_2026-10-17.md](docs/검증결과_A_2026-10-17.md) · [docs/트러블슈팅.md](docs/트러블슈팅.md) · [VULN-FINDINGS.md](VULN-FINDINGS.md) · [작업내역_체크리스트.md](작업내역_체크리스트.md)

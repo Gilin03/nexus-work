@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}휴가 신청 · NEXUS WORK{% endblock %}
+{% block content %}
+<a class="crumb" href="{{ url_for('hr.leave_list') }}">&larr; 휴가관리</a>
+<h1>휴가 신청</h1>
+<div class="sheet narrow">
+  {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+  <p class="hint">{{ year }}년 잔여 연차 {{ '%g' % balance[2] }}일. 주말은 일수에 포함되지 않고, 반차는 하루만 신청할 수 있으며 0.5일로 계산됩니다. 팀장 또는 관리자가 승인하면 확정됩니다.</p>
+  <form method="post" action="{{ url_for('hr.leave_new') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>종류
+      <select name="leave_type" required>
+        {% for key, label in types.items() %}<option value="{{ key }}"{% if values.get('leave_type') == key %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>시작일 (YYYY-MM-DD)
+      <input name="start_date" required maxlength="10" pattern="\d{4}-\d{2}-\d{2}" placeholder="2026-10-26" value="{{ values.get('start_date', '') }}">
+    </label>
+    <label>종료일 (반차·하루는 비워도 됩니다)
+      <input name="end_date" maxlength="10" pattern="\d{4}-\d{2}-\d{2}" placeholder="2026-10-27" value="{{ values.get('end_date', '') }}">
+    </label>
+    <label>사유
+      <input name="reason" required maxlength="200" value="{{ values.get('reason', '') }}">
+    </label>
+    <div class="actions"><button type="submit" class="btn primary">신청</button></div>
+  </form>
+</div>
+{% endblock %}

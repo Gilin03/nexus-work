@@ -36,7 +36,7 @@
 | D05 | 같은 계정에 비밀번호 5회 실패 → 맞는 비밀번호 → 관리자 해제 | 잠금 중에는 맞는 비밀번호도 401, 해제 후 로그인 | `login_failure`×5, `account_locked`, `login_locked`, `admin_action`(unlock) |
 | D06 | SQL 인젝션 탐침 12종을 로그인·직원검색·게시글·챗봇·ID·page 에 | 오류 정보·지연(시간 기반)·결과 확장·표 변경 없음 | `suspicious_input`(sqli), `login_failure`(invalid_format) |
 | D07 | XSS 탐침 5종을 게시글·챗봇·경비·결재·검색에 | 모두 글자로만 표시(스크립트 실행 안 됨) | `suspicious_input`(xss) |
-| D08 | 업로드 우회 8종(php, 이중 확장자, html, `.htaccess`, 위장 png, 2MB 초과) | 모두 거부, 업로드 폴더 변화 없음. 정상 파일은 첨부·nosniff 로만 다운로드 | `upload_reject`(extension_not_allowed / content_mismatch), `request_rejected`(http_413) |
+| D08 | 업로드 우회 9종(php, 이중 확장자, html, svg, `.htaccess`, 위장 png, 2MB 초과 등) — **첨부는 제한 없이 받는다(2026-10-19)** | 모두 받아 무작위 이름으로 저장, 전부 첨부·nosniff 로만 내려가고 HTML·SVG 로 해석되지 않으며 그림·PDF 가 아니면 인라인 안 열림. 프로필 사진은 위험 파일 3종 거부 | `upload_reject`(프로필 사진 거부), `post_created`(attachments·bytes) |
 | D09 | 경로 탐색·내부 파일 요청 13종(`../`, `.env`, `.git`, `logs/` 등) | 404, 설정·비밀 내용 없음 | `not_found`, `suspicious_input`(traversal) |
 | D10 | 직원이 타인 급여·기밀·재무·관리자·타인 경비/결재 접근, 역할 변경·승인·삭제 시도 | 모두 403, 역할 불변 | `authz_deny`(out_of_scope / insufficient_role / not_party / not_approver / not_owner) |
 | D11 | CSRF 위조 요청(토큰 없음·틀린 토큰) | 403, 세션 유지 | `csrf_fail` |

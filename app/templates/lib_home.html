@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}자료실 · NEXUS WORK{% endblock %}
+{% block content %}
+<h1>자료실</h1>
+<div class="sheet">
+  {% if rows %}
+  <div class="scroll">
+    <table>
+      <thead><tr><th>폴더</th><th>공개 범위</th><th class="num">하위 폴더</th><th class="num">파일</th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <td><a href="{{ url_for('library.folder_view', folder_id=r.id) }}">&#128193; {{ r.name }}</a></td>
+          <td>{{ '전사 공개' if r.scope == 'company' else r.dept ~ ' 공개' }}</td>
+          <td class="num">{{ r.subs }}</td>
+          <td class="num">{{ r.files }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="hint">볼 수 있는 폴더가 없습니다.{% if can_create %} 아래에서 폴더를 만드세요.{% endif %}</p>
+  {% endif %}
+</div>
+{% if can_create %}
+<div class="sheet narrow">
+  <h2>최상위 폴더 만들기</h2>
+  <form method="post" action="{{ url_for('library.folder_new') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>이름 <input name="name" required maxlength="50"></label>
+    {% if is_admin %}
+    <label>공개 범위
+      <select name="scope"><option value="company">전사 공개</option><option value="dept">부서 공개</option></select>
+    </label>
+    <label>부서 (부서 공개일 때)
+      <select name="dept">{% for d in depts %}<option>{{ d }}</option>{% endfor %}</select>
+    </label>
+    {% else %}
+    <p class="hint">팀장이 만든 최상위 폴더는 내 부서에만 공개됩니다.</p>
+    <input type="hidden" name="scope" value="dept">
+    {% endif %}
+    <div class="actions"><button type="submit" class="btn primary">만들기</button></div>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

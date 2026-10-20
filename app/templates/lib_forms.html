@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}양식 모음 · NEXUS WORK{% endblock %}
+{% block content %}
+<h1>양식 모음</h1>
+<div class="sheet">
+  <h2>전자결재 양식 바로가기</h2>
+  <p class="actions">{% for label, href in shortcuts %}<a class="btn" href="{{ href }}">{{ label }}</a>{% endfor %}</p>
+</div>
+<div class="sheet">
+  <h2>서식 파일</h2>
+  {% if rows %}
+  <div class="scroll">
+    <table>
+      <thead><tr><th>분류</th><th>제목</th><th>설명</th><th>파일</th><th>등록</th><th></th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <td>{{ r.category }}</td>
+          <td><a href="{{ url_for('library.form_download', form_id=r.id) }}">{{ r.title }}</a></td>
+          <td>{{ r.description }}</td>
+          <td>{{ r.orig_name }} <span class="hint">{{ '{:,}'.format(r.size) }} B</span></td>
+          <td class="num">{{ r.created_at.strftime('%Y-%m-%d') }}</td>
+          <td>
+            {% if is_admin %}
+            <form method="post" action="{{ url_for('library.form_delete', form_id=r.id) }}" class="inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn small">삭제</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="hint">등록된 서식 파일이 없습니다.</p>
+  {% endif %}
+</div>
+{% if is_admin %}
+<div class="sheet narrow">
+  <h2>서식 올리기 (관리자)</h2>
+  <form method="post" action="{{ url_for('library.form_upload') }}" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>제목 <input name="title" required maxlength="100"></label>
+    <label>분류 <select name="category">{% for c in categories %}<option>{{ c }}</option>{% endfor %}</select></label>
+    <label>설명 <input name="description" maxlength="200"></label>
+    <label>파일 <input type="file" name="file" required></label>
+    <div class="actions"><button type="submit" class="btn primary">올리기</button></div>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

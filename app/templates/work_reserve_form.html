@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}예약 · NEXUS WORK{% endblock %}
+{% block content %}
+<a class="crumb" href="{{ url_for('work.reservation_list', date=values.get('date', '')) }}">&larr; 예약 현황</a>
+<h1>{{ res.name }} 예약</h1>
+<div class="sheet narrow">
+  {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+  <p class="hint">{{ res.location }}{% if res.capacity %} · {{ res.capacity }}명{% endif %}{% if res.description %} · {{ res.description }}{% endif %}<br>
+    08:00~20:00, 30분 단위, 하루 안에서 최대 {{ max_hours }}시간, 오늘부터 {{ ahead }}일 이내만 예약할 수 있습니다.</p>
+  <form method="post" action="{{ url_for('work.reservation_new') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="resource_id" value="{{ res.id }}">
+    <label>날짜 (YYYY-MM-DD) <input name="date" required maxlength="10" pattern="\d{4}-\d{2}-\d{2}" value="{{ values.get('date', '') }}"></label>
+    <label>시작
+      <select name="start_time">{% for s in slots[:-1] %}<option{% if values.get('start_time') == s %} selected{% endif %}>{{ s }}</option>{% endfor %}</select>
+    </label>
+    <label>종료
+      <select name="end_time">{% for s in slots[1:] %}<option{% if values.get('end_time') == s %} selected{% endif %}>{{ s }}</option>{% endfor %}</select>
+    </label>
+    <label>사용 목적 <input name="purpose" required maxlength="100" value="{{ values.get('purpose', '') }}"></label>
+    <div class="actions"><button type="submit" class="btn primary">예약</button></div>
+  </form>
+</div>
+{% endblock %}

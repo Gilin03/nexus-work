@@ -33,7 +33,9 @@ class Config:
         self.SESSION_ABSOLUTE_SECONDS = 8 * 3600  # 로그인 후 8시간이 지나면 활동 중이어도 만료
 
         # 업로드: 웹루트 밖 instance/uploads, 2MB 상한
-        self.MAX_CONTENT_LENGTH = 2 * 1024 * 1024
+        self.MAX_CONTENT_LENGTH = 2 * 1024 * 1024  # 첨부가 없는 모든 요청(프로필 사진 포함)의 본문 상한
+        # 게시판·결재 첨부 요청은 용량 제한이 없다(security.apply_upload_limit). 필요하면 .env 의 MAX_UPLOAD_BYTES 로 다시 건다.
+        self.UPLOAD_MAX_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", "0") or 0) or None
         self.UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", BASE_DIR / "instance" / "uploads"))
         self.LOG_DIR = Path(os.environ.get("LOG_DIR", BASE_DIR / "logs"))
         self.GRAYLOG_GELF_ENABLED = os.environ.get("GRAYLOG_GELF_ENABLED", "0") == "1"

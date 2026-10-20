@@ -40,7 +40,10 @@ def pending_approval(root, requester, approver):
 # ---------- 모든 관리자 경로는 관리자만 ----------
 def test_every_admin_route_requires_admin(aapp, root):
     rules = [r for r in aapp.url_map.iter_rules() if r.rule.startswith("/admin")]
-    assert {r.rule for r in rules} == {"/admin/users", "/admin/users/<int:user_id>/role", "/admin/users/<int:user_id>/unlock"}
+    assert {r.rule for r in rules} == {
+        "/admin/users", "/admin/users/new", "/admin/users/<int:user_id>/role", "/admin/users/<int:user_id>/unlock",
+        "/admin/users/<int:user_id>/lock", "/admin/users/<int:user_id>/reset-password", "/admin/overview", "/admin/audit",
+        "/admin/audit/export.csv", "/admin/users/<int:user_id>/title", "/admin/permissions"}
     before = snapshot(root)
     anon, emp, mgr = aapp.test_client(), as_user(aapp, "zz_emp"), as_user(aapp, "zz_mgr")
     for rule in rules:
@@ -191,9 +194,10 @@ def test_demoted_approver_can_no_longer_decide_pending_approvals(aapp, root, eve
 
 def test_demoted_manager_disappears_from_approver_candidates(aapp, root):
     emp = as_user(aapp, "zz_emp")
-    assert f'value="{uid(root, "zz_mgr")}"' in emp.get("/approvals/new").get_data(as_text=True)
+    approvers = lambda: emp.get("/approvals/new").get_data(as_text=True).split('name="cc"')[0]   # 결재자 선택 칸만
+    assert f'value="{uid(root, "zz_mgr")}"' in approvers()
     set_role(as_user(aapp, "zz_adm"), root, "zz_mgr", "employee", "manager")
-    assert f'value="{uid(root, "zz_mgr")}"' not in emp.get("/approvals/new").get_data(as_text=True)
+    assert f'value="{uid(root, "zz_mgr")}"' not in approvers()
 
 
 # ---------- 잠금 해제 ----------

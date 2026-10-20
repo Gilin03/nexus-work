@@ -8,9 +8,19 @@
   <div class="body">{{ post.body }}</div>
   {% if files %}
   <h2>첨부</h2>
+  {% for f in files if f.mime in ('image/png', 'image/jpeg') %}
+  <figure class="attach-figure">
+    <img class="attach-img" src="{{ url_for('portal.attachment_view', att_id=f.id) }}" alt="{{ f.orig_name }}">
+    <figcaption class="hint">{{ f.orig_name }}</figcaption>
+  </figure>
+  {% endfor %}
   <ul class="menu-list">
     {% for f in files %}
-    <li><a href="{{ url_for('portal.attachment', att_id=f.id) }}">{{ f.orig_name }}</a> <span class="hint">({{ f.size }} bytes)</span></li>
+    <li>
+      {{ f.orig_name }} <span class="hint">({{ f.size }} bytes)</span>
+      {% if f.mime == 'application/pdf' %}<a href="{{ url_for('portal.attachment_view', att_id=f.id) }}" target="_blank" rel="noopener">보기</a> · {% endif %}
+      <a href="{{ url_for('portal.attachment', att_id=f.id) }}">다운로드</a>
+    </li>
     {% endfor %}
   </ul>
   {% endif %}

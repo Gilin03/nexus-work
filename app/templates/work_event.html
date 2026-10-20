@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}{{ e.title }} · 일정 · NEXUS WORK{% endblock %}
+{% block content %}
+<a class="crumb" href="{{ url_for('work.calendar', month=e.start_at.strftime('%Y-%m')) }}">&larr; 일정</a>
+<h1>{{ e.title }}{% if e.status == 'cancelled' %} <span class="st st-withdrawn">취소됨</span>{% endif %}</h1>
+<div class="sheet">
+  <table class="kv">
+    <tbody>
+      <tr><th>일시</th><td>{% if e.all_day %}{{ e.start_at.strftime('%Y-%m-%d') }}{% if e.end_at.date() != e.start_at.date() %} ~ {{ e.end_at.strftime('%Y-%m-%d') }}{% endif %} (종일){% else %}{{ e.start_at.strftime('%Y-%m-%d %H:%M') }} ~ {% if e.end_at.date() == e.start_at.date() %}{{ e.end_at.strftime('%H:%M') }}{% else %}{{ e.end_at.strftime('%Y-%m-%d %H:%M') }}{% endif %}{% endif %}</td></tr>
+      <tr><th>장소</th><td>{{ e.location or '-' }}</td></tr>
+      <tr><th>등록자</th><td>{{ e.owner }} <span class="hint">({{ e.owner_dept }})</span></td></tr>
+      <tr><th>공개 범위</th><td>{{ scopes[e.scope] }}</td></tr>
+      <tr><th>참석자</th><td>{% if people %}{% for p in people %}{{ p.display_name }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}-{% endif %}</td></tr>
+    </tbody>
+  </table>
+  {% if e.description %}<h2>내용</h2><p class="prewrap">{{ e.description }}</p>{% endif %}
+  {% if can_cancel %}
+  <form method="post" action="{{ url_for('work.event_cancel', event_id=e.id) }}" class="inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn danger">일정 취소</button>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

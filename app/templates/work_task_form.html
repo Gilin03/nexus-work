@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}업무 등록 · NEXUS WORK{% endblock %}
+{% block content %}
+<a class="crumb" href="{{ url_for('work.task_list') }}">&larr; 업무 관리</a>
+<h1>업무 등록·요청</h1>
+<div class="sheet narrow">
+  {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+  <p class="hint">담당자를 다른 사람으로 정하면 그 사람에게 업무를 요청하는 것입니다. 프로젝트 업무는 프로젝트 구성원에게만 맡길 수 있습니다.</p>
+  <form method="post" action="{{ url_for('work.task_new') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>제목 <input name="title" required maxlength="120" value="{{ values.get('title', '') }}"></label>
+    <label>내용 <textarea name="description" rows="5" maxlength="2000">{{ values.get('description', '') }}</textarea></label>
+    <label>담당자
+      <select name="assignee_id" required>
+        {% for u in users %}<option value="{{ u.id }}"{% if values.get('assignee_id') == u.id|string %} selected{% endif %}>{{ u.display_name }} ({{ u.dept }})</option>{% endfor %}
+      </select>
+    </label>
+    <label>우선순위
+      <select name="priority">
+        {% for key, label in priorities.items() %}<option value="{{ key }}"{% if values.get('priority', 'normal') == key %} selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>마감일 (선택, YYYY-MM-DD) <input name="due_date" maxlength="10" pattern="\d{4}-\d{2}-\d{2}" placeholder="2026-10-30" value="{{ values.get('due_date', '') }}"></label>
+    <label>프로젝트 (선택)
+      <select name="project_id">
+        <option value="">없음</option>
+        {% for p in projects %}<option value="{{ p.id }}"{% if values.get('project_id') == p.id|string %} selected{% endif %}>{{ p.name }}</option>{% endfor %}
+      </select>
+    </label>
+    <div class="actions"><button type="submit" class="btn primary">등록</button></div>
+  </form>
+</div>
+{% endblock %}

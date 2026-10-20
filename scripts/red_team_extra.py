@@ -39,9 +39,9 @@ SSTI = ["{{7*7}}", "{{config}}", "{{self}}", "{%for x in ().__class__.__base__._
         "${7*7}", "#{7*7}", "{{''.__class__.__mro__}}"]
 UPLOAD_REJECT = [
     ("evil.svg", b"<svg onload=alert(1)>", "svg"),
-    ("shell.phtml", b"<?php system($_GET['c']);?>", "phtml"),
-    ("shell.jsp", b"<% Runtime.getRuntime().exec(\"id\"); %>", "jsp"),
-    ("shell.asp", b"<% eval request(\"c\") %>", "asp"),
+    ("shell.phtml", b"<?php echo 1;?>", "phtml"),
+    ("shell.jsp", b"<% out.print(1); %>", "jsp"),
+    ("shell.asp", b"<% Response.Write(1) %>", "asp"),
     ("x.exe", b"MZ" + b"\x00" * 30, "exe"),
     ("..%2f..%2fevil.txt", b"hello", "traversal-in-filename"),
     ("fake.PNG", b"not a real png", "uppercase-ext-fake-content"),  # 확장자는 맞지만 내용 불일치
@@ -90,7 +90,7 @@ def e01(c):
         if not body or CANARY not in body.group(1):
             p.append("게시글 본문: {{7*7}} 원문이 그대로 보이지 않음(평가됐을 가능성)")
     if r2.status == 303:
-        body = re.search(r'<div class="body">(.*?)</div>', c.emp.get(r2.location).text, re.S)
+        body = re.search(r'<div class="body[^"]*">(.*?)</div>', c.emp.get(r2.location).text, re.S)
         if not body or CANARY not in body.group(1):
             p.append("결재 본문: {{7*7}} 원문이 그대로 보이지 않음(평가됐을 가능성)")
     chat_html = c.emp.get("/chat").text
@@ -205,27 +205,36 @@ def e04(c):
     return dc.verdict(p, "문서·게시글·첨부·기밀문서·재무·급여·경비·결재 ID를 1~9 전수로 직원·비로그인 계정으로 조회: 범위 밖은 403/404, 비로그인은 전부 차단")
 
 
-@dc.scenario("E05", "업로드 우회 추가 변형")
+@dc.scenario("E05", "업로드 우회 추가 변형(제한 없이 받되 무해하게 처리)")
 def e05(c):
+    """첨부는 형식·개수·용량을 제한하지 않는다(사용자 결정 2026-10-19). 예전의 '거부' 목록도 이제는 모두 받아서, 받은 뒤에도 무해한지 본다:
+    항상 첨부+nosniff 로 내려가고 HTML·SVG·XML 로 해석될 Content-Type 이 아니며, 그림·PDF 가 아닌 것은 인라인으로 열리지 않는다."""
     def count():
         return len(list(c.upload_dir.glob("*"))) if c.upload_dir.exists() else 0
     before, p, accepted = count(), [], 0
-    for name, data, label in UPLOAD_REJECT:
-        r = c.emp.post("/boards/free/new", {"title": f"업로드추가-{label}", "body": "x"},
-                       token_from="/boards/free/new", files={"attachment": (name, data)})
-        if r.status not in (400, 413, 0):
-            p.append(f"{label}({name[:30]}) → {r.status}(거부됐어야 함)")
-    for name, data, label in UPLOAD_ACCEPT:
+    for name, data, label in list(UPLOAD_REJECT) + list(UPLOAD_ACCEPT):
         r = c.emp.post("/boards/free/new", {"title": f"업로드추가-{label}", "body": "x"},
                        token_from="/boards/free/new", files={"attachment": (name, data)})
         if r.status != 303:
-            p.append(f"{label}: 정상 파일이 거부됨 → {r.status}")
-        else:
-            accepted += 1
+            p.append(f"{label}({name[:30]}) → {r.status}(제한이 없으므로 받아야 함)")
+            continue
+        accepted += 1
+        att = re.search(r"/attachments/(\d+)", c.emp.get(r.location).text)
+        if not att:
+            p.append(f"{label}: 글 화면에 첨부 링크가 없음")
+            continue
+        d = c.emp.get(f"/attachments/{att.group(1)}")
+        h = {k.lower(): v for k, v in d.headers.items()}
+        if d.status != 200 or not h.get("content-disposition", "").startswith("attachment") or h.get("x-content-type-options") != "nosniff":
+            p.append(f"{label}: 첨부·nosniff 가 아닌 방식으로 내려감")
+        if h.get("content-type", "").startswith(("text/html", "image/svg", "application/xhtml", "text/xml", "application/xml")):
+            p.append(f"{label}: Content-Type 이 {h.get('content-type')}")
+        v = c.emp.get(f"/attachments/{att.group(1)}/view")
+        if v.status == 200 and not {k.lower(): x for k, x in v.headers.items()}.get("content-type", "").startswith(("image/png", "image/jpeg", "application/pdf")):
+            p.append(f"{label}: 그림·PDF 가 아닌데 인라인으로 열림")
     if count() != before + accepted:
-        p.append(f"업로드 폴더 파일 수 변화 {count() - before}건(정상 통과 {accepted}건과 불일치)")
-    return dc.verdict(p, f"SVG·phtml·jsp·asp·exe·경로조작파일명·내용불일치 {len(UPLOAD_REJECT)}종 전부 거부, "
-                         f"대문자 확장자·과장 파일명(정상 내용) {len(UPLOAD_ACCEPT)}종은 정상 통과")
+        p.append(f"업로드 폴더 파일 수 변화 {count() - before}건(받은 {accepted}건과 불일치)")
+    return dc.verdict(p, f"SVG·phtml·jsp·asp·exe·경로조작파일명·내용불일치·대문자 확장자·과장 파일명 {accepted}종을 모두 받아 저장, 전부 첨부·nosniff 로만 내려가고 문서로 해석되지 않으며 인라인 표시 없음")
 
 
 @dc.scenario("E06", "열린 리다이렉트 추정")
@@ -377,7 +386,7 @@ def e14(c):
     def count():
         return len(list(c.upload_dir.glob("*"))) if c.upload_dir.exists() else 0
     before, p = count(), []
-    polyglot = dc.PNG + b"<?php system($_GET['c']); ?><script>alert(1)</script>"
+    polyglot = dc.PNG + b"<?php echo 1; ?><script>alert(1)</script>"
     r = c.emp.post("/boards/free/new", {"title": "폴리글랏", "body": "x"}, token_from="/boards/free/new",
                    files={"attachment": ("evil.png", polyglot)})
     if r.status != 303:

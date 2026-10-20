@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}프로젝트 · NEXUS WORK{% endblock %}
+{% block content %}
+<h1>프로젝트</h1>
+{% if can_create %}<p class="actions"><a class="btn primary" href="{{ url_for('work.project_new') }}">프로젝트 만들기</a></p>{% endif %}
+<div class="sheet">
+  {% if rows %}
+  <div class="scroll">
+    <table>
+      <thead><tr><th>프로젝트</th><th>책임자</th><th class="num">구성원</th><th>기간</th><th>진척</th><th>상태</th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <td><a href="{{ url_for('work.project_detail', project_id=r.id) }}">{{ r.name }}</a></td>
+          <td>{{ r.owner }}</td>
+          <td class="num">{{ r.members }}</td>
+          <td>{% if r.start_date or r.end_date %}{{ r.start_date.strftime('%Y-%m-%d') if r.start_date else '' }} ~ {{ r.end_date.strftime('%Y-%m-%d') if r.end_date else '' }}{% endif %}</td>
+          <td><progress max="100" value="{{ r.percent }}" aria-label="진척 {{ r.percent }}%"></progress> <span class="hint">{{ r.done }}/{{ r.total }}</span></td>
+          <td><span class="tk tk-{{ 'doing' if r.status == 'active' else 'done' }}">{{ statuses[r.status] }}</span></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="hint">참여 중인 프로젝트가 없습니다. 프로젝트는 팀장 또는 관리자가 만들고 구성원으로 추가해야 보입니다.</p>
+  {% endif %}
+</div>
+{% endblock %}

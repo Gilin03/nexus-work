@@ -13,10 +13,12 @@
     <label>내용
       <textarea name="body" required maxlength="5000" rows="8"></textarea>
     </label>
-    <label>첨부 (pdf, png, jpg, txt · 2MB 이하)
-      <input type="file" name="attachment" accept=".pdf,.png,.jpg,.txt">
+    <label>첨부 (선택, 여러 개 가능 · 형식·개수·용량 제한 없음) — 내용 칸에 그림·파일을 붙여넣기(Ctrl+V)하거나 끌어다 놓아도 됩니다
+      <input type="file" name="attachment" id="attachment" multiple>
     </label>
+    <div id="attach-preview" class="attach-preview" hidden></div>
     <button type="submit" class="btn primary">등록</button>
   </form>
 </div>
 {% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='paste-attach.js') }}" defer></script>{% endblock %}

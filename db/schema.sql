@@ -9,6 +9,7 @@ CREATE TABLE users (
   failed_count  INT UNSIGNED NOT NULL DEFAULT 0,
   locked_until  DATETIME     NULL,
   session_version INT UNSIGNED NOT NULL DEFAULT 0,   -- 로그아웃·비밀번호 변경 때 올려 이전 세션 쿠키를 모두 무효화한다
+  pinned        TINYINT(1)   NOT NULL DEFAULT 0,     -- 1 이면 최상위(admin) 권한 고정 계정: 보안관제팀 소속과 시스템관리자(아래 트리거가 정한다)
   created_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
@@ -34,6 +35,9 @@ CREATE TABLE employees (
   dept    VARCHAR(64) NOT NULL,
   title   VARCHAR(64) NOT NULL,
   ext     VARCHAR(16) NOT NULL,
+  emp_no       VARCHAR(16)  NULL UNIQUE,                 -- 사번
+  hire_date    DATE         NULL,                        -- 입사일
+  annual_days  TINYINT UNSIGNED NOT NULL DEFAULT 15,     -- 연간 부여 연차(일)
   FOREIGN KEY (user_id) REFERENCES users(id)
 ) ENGINE=InnoDB;
 
@@ -89,9 +93,54 @@ CREATE TABLE attachments (
   stored_name CHAR(36)     NOT NULL UNIQUE,
   orig_name   VARCHAR(120) NOT NULL,
   mime        VARCHAR(64)  NOT NULL,
-  size        INT UNSIGNED NOT NULL,
+  size        BIGINT UNSIGNED NOT NULL,   -- 용량 제한이 없으므로 4GB 를 넘는 파일도 담는다
   sha256      CHAR(64)     NOT NULL,
   FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- 근태: 하루에 한 행(출근 시각, 퇴근 시각). 시각은 서버가 한국 시간으로 정해 넣고 사용자가 보낸 값은 쓰지 않는다.
+CREATE TABLE attendance (
+  id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  user_id    INT UNSIGNED NOT NULL,
+  work_date  DATE         NOT NULL,
+  check_in   DATETIME     NOT NULL,
+  check_out  DATETIME     NULL,
+  UNIQUE KEY uq_attendance (user_id, work_date),
+  CONSTRAINT chk_attendance_order CHECK (check_out IS NULL OR check_out >= check_in),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- 휴가 신청: 신청자·종류·기간·일수는 만든 뒤 바꿀 수 없고, 상태 전이(승인·반려·취소)에 필요한 열만 수정할 수 있다.
+-- 본인 신청은 본인이 결재할 수 없다(CHECK). 결재자 삭제 시 이력을 지우지 않도록 decided_by 는 기본 제약(RESTRICT)이다.
+CREATE TABLE leave_requests (
+  id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  user_id         INT UNSIGNED NOT NULL,
+  leave_type      ENUM('annual','half','sick') NOT NULL,
+  start_date      DATE         NOT NULL,
+  end_date        DATE         NOT NULL,
+  days            DECIMAL(4,1) NOT NULL,
+  reason          VARCHAR(200) NOT NULL,
+  status          ENUM('pending','approved','rejected','cancelled') NOT NULL DEFAULT 'pending',
+  decided_by      INT UNSIGNED NULL,
+  decided_at      DATETIME     NULL,
+  decision_reason VARCHAR(200) NULL,
+  created_at      TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT chk_leave_dates CHECK (end_date >= start_date),
+  CONSTRAINT chk_leave_days CHECK (days > 0 AND days <= 30),
+  CONSTRAINT chk_leave_no_self_decision CHECK (decided_by IS NULL OR decided_by <> user_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (decided_by) REFERENCES users(id)
+) ENGINE=InnoDB;
+
+-- 프로필 사진: 사용자당 한 장. 파일은 웹루트 밖 instance/uploads/avatars 에 무작위 이름으로 둔다.
+CREATE TABLE profile_photos (
+  user_id     INT UNSIGNED PRIMARY KEY,
+  stored_name CHAR(36)     NOT NULL UNIQUE,
+  mime        VARCHAR(64)  NOT NULL,
+  size        INT UNSIGNED NOT NULL,
+  sha256      CHAR(64)     NOT NULL,
+  updated_at  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
 -- 챗봇 대화 기록: 본인 것만 조회(앱에서 user_id 로 강제)
@@ -121,10 +170,14 @@ CREATE TABLE expenses (
 CREATE TABLE approvals (
   id           INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   title        VARCHAR(200) NOT NULL,
-  body         TEXT         NOT NULL,
+  body         MEDIUMTEXT   NOT NULL,                  -- body_html=1 이면 app/richtext.py 로 살균한 HTML(공문 본문), 0 이면 일반 글자
+  body_html    TINYINT(1)   NOT NULL DEFAULT 0,
+  recipient    VARCHAR(100) NULL,                      -- 공문의 수신(받는 곳). 비어 있으면 내부 결재
   requester_id INT UNSIGNED NOT NULL,
   expense_id   INT UNSIGNED NULL,
   status       ENUM('pending','approved','rejected','withdrawn') NOT NULL DEFAULT 'pending',
+  doc_type     ENUM('general','coop','trip','purchase','expense','expenditure') NOT NULL DEFAULT 'general',   -- 양식(문서번호 앞부분)
+  urgency      ENUM('normal','urgent') NOT NULL DEFAULT 'normal',
   current_step TINYINT UNSIGNED NOT NULL DEFAULT 1,
   decided_at   DATETIME     NULL,
   created_at   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -149,6 +202,223 @@ CREATE TABLE approval_steps (
   FOREIGN KEY (approver_id) REFERENCES users(id)
 ) ENGINE=InnoDB;
 
+-- 참조자: 결재하지는 않지만 문서를 볼 수 있는 사람(상신 시점에 정해지며 이후 바꿀 수 없다).
+CREATE TABLE approval_cc (
+  approval_id INT UNSIGNED NOT NULL,
+  user_id     INT UNSIGNED NOT NULL,
+  PRIMARY KEY (approval_id, user_id),
+  KEY idx_cc_user (user_id),
+  FOREIGN KEY (approval_id) REFERENCES approvals(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- 결재 첨부파일: 파일은 웹루트 밖 instance/uploads/approvals 에 무작위 이름으로 둔다. 상신할 때와, 결재자가 승인·반려할 때 올릴 수 있다.
+CREATE TABLE approval_files (
+  id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  approval_id INT UNSIGNED NOT NULL,
+  stored_name CHAR(36)     NOT NULL UNIQUE,
+  orig_name   VARCHAR(120) NOT NULL,
+  mime        VARCHAR(64)  NOT NULL,
+  size        BIGINT UNSIGNED NOT NULL,   -- 용량 제한이 없으므로 4GB 를 넘는 파일도 담는다
+  sha256      CHAR(64)     NOT NULL,
+  step_no     TINYINT UNSIGNED NULL,     -- NULL = 상신할 때 올린 첨부, 값이 있으면 그 결재 단계에서 결재자가 올린 첨부
+  uploaded_by INT UNSIGNED NULL,         -- 결재 첨부를 올린 결재자(상신 첨부는 NULL = 상신자)
+  KEY idx_files_approval (approval_id),
+  FOREIGN KEY (approval_id) REFERENCES approvals(id) ON DELETE CASCADE,
+  FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- 지출결의서(양식 expenditure): 결재 문서 하나에 지출 정보 한 행과 내역 여러 행이 붙는다. 금액은 서버가 수량×단가로 계산해 넣고
+-- 합계도 서버가 낸다(화면에서 보낸 금액은 쓰지 않는다). 상신한 뒤에는 수정·삭제할 수 없다(grants.sql).
+CREATE TABLE expenditures (
+  approval_id   INT UNSIGNED PRIMARY KEY,
+  spend_date    DATE         NOT NULL,                  -- 지출 일자
+  account_name  VARCHAR(40)  NOT NULL,                  -- 계정과목(앱의 허용 목록)
+  pay_method    ENUM('card','transfer','cash') NOT NULL,
+  payee         VARCHAR(100) NOT NULL,                  -- 지급처(거래처)
+  payee_account VARCHAR(100) NULL,                      -- 지급 계좌(계좌이체일 때). 민감 정보라 로그에 남기지 않는다
+  pay_due       DATE         NULL,                      -- 지급 예정일
+  evidence      ENUM('receipt','tax_invoice','card_slip','contract','none') NOT NULL,
+  total_amount  BIGINT UNSIGNED NOT NULL,
+  CONSTRAINT chk_expenditure_total CHECK (total_amount > 0),
+  FOREIGN KEY (approval_id) REFERENCES approvals(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+CREATE TABLE expenditure_items (
+  id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  approval_id INT UNSIGNED NOT NULL,
+  line_no     TINYINT UNSIGNED NOT NULL,
+  item        VARCHAR(100) NOT NULL,
+  memo        VARCHAR(100) NULL,
+  qty         INT UNSIGNED NOT NULL,
+  unit_price  BIGINT UNSIGNED NOT NULL,
+  amount      BIGINT UNSIGNED NOT NULL,                 -- qty × unit_price (서버가 계산)
+  UNIQUE KEY uq_expenditure_line (approval_id, line_no),
+  CONSTRAINT chk_expenditure_qty CHECK (qty > 0),
+  CONSTRAINT chk_expenditure_amount CHECK (amount = qty * unit_price),
+  FOREIGN KEY (approval_id) REFERENCES approvals(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- ===== 업무(할 일·일정·예약·프로젝트)와 자료(자료실·주소록·양식 모음) =====
+
+CREATE TABLE projects (
+  id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  name        VARCHAR(80)  NOT NULL UNIQUE,
+  description VARCHAR(500) NOT NULL DEFAULT '',
+  owner_id    INT UNSIGNED NOT NULL,
+  status      ENUM('active','done') NOT NULL DEFAULT 'active',
+  start_date  DATE NULL,
+  end_date    DATE NULL,
+  created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT chk_project_dates CHECK (start_date IS NULL OR end_date IS NULL OR end_date >= start_date),
+  FOREIGN KEY (owner_id) REFERENCES users(id)
+) ENGINE=InnoDB;
+CREATE TABLE project_members (
+  project_id INT UNSIGNED NOT NULL,
+  user_id    INT UNSIGNED NOT NULL,
+  PRIMARY KEY (project_id, user_id),
+  FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+CREATE TABLE tasks (
+  id           INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  title        VARCHAR(120)  NOT NULL,
+  description  VARCHAR(2000) NOT NULL DEFAULT '',
+  creator_id   INT UNSIGNED NOT NULL,
+  assignee_id  INT UNSIGNED NOT NULL,
+  project_id   INT UNSIGNED NULL,
+  priority     ENUM('low','normal','high') NOT NULL DEFAULT 'normal',
+  due_date     DATE NULL,
+  status       ENUM('todo','doing','done','cancelled') NOT NULL DEFAULT 'todo',
+  completed_at DATETIME NULL,
+  created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_tasks_assignee (assignee_id, status),
+  KEY idx_tasks_creator (creator_id),
+  KEY idx_tasks_project (project_id),
+  FOREIGN KEY (creator_id) REFERENCES users(id),
+  FOREIGN KEY (assignee_id) REFERENCES users(id),
+  FOREIGN KEY (project_id) REFERENCES projects(id)
+) ENGINE=InnoDB;
+CREATE TABLE task_comments (
+  id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  task_id    INT UNSIGNED NOT NULL,
+  user_id    INT UNSIGNED NOT NULL,
+  body       VARCHAR(1000) NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id)
+) ENGINE=InnoDB;
+CREATE TABLE events (
+  id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  owner_id    INT UNSIGNED NOT NULL,
+  title       VARCHAR(100)  NOT NULL,
+  location    VARCHAR(100)  NOT NULL DEFAULT '',
+  description VARCHAR(1000) NOT NULL DEFAULT '',
+  start_at    DATETIME NOT NULL,
+  end_at      DATETIME NOT NULL,
+  all_day     TINYINT(1) NOT NULL DEFAULT 0,
+  scope       ENUM('private','team','company') NOT NULL DEFAULT 'private',
+  status      ENUM('active','cancelled') NOT NULL DEFAULT 'active',
+  created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_events_start (start_at),
+  CONSTRAINT chk_event_times CHECK (end_at >= start_at),
+  FOREIGN KEY (owner_id) REFERENCES users(id)
+) ENGINE=InnoDB;
+CREATE TABLE event_attendees (
+  event_id INT UNSIGNED NOT NULL,
+  user_id  INT UNSIGNED NOT NULL,
+  PRIMARY KEY (event_id, user_id),
+  FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+CREATE TABLE resources (
+  id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  name        VARCHAR(60)  NOT NULL UNIQUE,
+  kind        ENUM('room','equipment') NOT NULL,
+  location    VARCHAR(60)  NOT NULL DEFAULT '',
+  capacity    SMALLINT UNSIGNED NULL,
+  description VARCHAR(200) NOT NULL DEFAULT '',
+  active      TINYINT(1) NOT NULL DEFAULT 1
+) ENGINE=InnoDB;
+CREATE TABLE reservations (
+  id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  resource_id INT UNSIGNED NOT NULL,
+  user_id     INT UNSIGNED NOT NULL,
+  start_at    DATETIME NOT NULL,
+  end_at      DATETIME NOT NULL,
+  purpose     VARCHAR(100) NOT NULL,
+  status      ENUM('active','cancelled') NOT NULL DEFAULT 'active',
+  created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_res_slot (resource_id, start_at),
+  CONSTRAINT chk_reservation_times CHECK (end_at > start_at),
+  FOREIGN KEY (resource_id) REFERENCES resources(id),
+  FOREIGN KEY (user_id) REFERENCES users(id)
+) ENGINE=InnoDB;
+
+CREATE TABLE lib_folders (
+  id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  parent_id  INT UNSIGNED NULL,
+  name       VARCHAR(50) NOT NULL,
+  scope      ENUM('company','dept') NOT NULL,
+  dept       VARCHAR(64) NULL,
+  created_by INT UNSIGNED NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  parent_key INT UNSIGNED AS (IFNULL(parent_id, 0)) STORED,   -- 최상위(NULL)도 같은 이름이 겹치지 않도록
+  UNIQUE KEY uq_folder_name (parent_key, name),
+  CONSTRAINT chk_folder_scope CHECK ((scope = 'company' AND dept IS NULL) OR (scope = 'dept' AND dept IS NOT NULL)),
+  FOREIGN KEY (parent_id) REFERENCES lib_folders(id),
+  FOREIGN KEY (created_by) REFERENCES users(id)
+) ENGINE=InnoDB;
+CREATE TABLE lib_files (
+  id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  folder_id   INT UNSIGNED NOT NULL,
+  version     INT UNSIGNED NOT NULL,                  -- 같은 폴더에 같은 이름을 올리면 새 버전(이전 버전은 남는다)
+  stored_name CHAR(36)     NOT NULL UNIQUE,
+  orig_name   VARCHAR(120) NOT NULL,
+  mime        VARCHAR(64)  NOT NULL,
+  size        BIGINT UNSIGNED NOT NULL,
+  sha256      CHAR(64)     NOT NULL,
+  note        VARCHAR(200) NOT NULL DEFAULT '',
+  uploaded_by INT UNSIGNED NOT NULL,
+  created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted_at  DATETIME NULL,
+  deleted_by  INT UNSIGNED NULL,
+  UNIQUE KEY uq_file_version (folder_id, orig_name, version),
+  FOREIGN KEY (folder_id) REFERENCES lib_folders(id),
+  FOREIGN KEY (uploaded_by) REFERENCES users(id),
+  FOREIGN KEY (deleted_by) REFERENCES users(id)
+) ENGINE=InnoDB;
+CREATE TABLE lib_forms (
+  id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  title       VARCHAR(100) NOT NULL,
+  category    VARCHAR(30)  NOT NULL,
+  description VARCHAR(200) NOT NULL DEFAULT '',
+  stored_name CHAR(36)     NOT NULL UNIQUE,
+  orig_name   VARCHAR(120) NOT NULL,
+  mime        VARCHAR(64)  NOT NULL,
+  size        BIGINT UNSIGNED NOT NULL,
+  sha256      CHAR(64)     NOT NULL,
+  uploaded_by INT UNSIGNED NOT NULL,
+  created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted_at  DATETIME NULL,
+  FOREIGN KEY (uploaded_by) REFERENCES users(id)
+) ENGINE=InnoDB;
+CREATE TABLE contacts (
+  id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  owner_id   INT UNSIGNED NOT NULL,
+  name       VARCHAR(60)  NOT NULL,
+  company    VARCHAR(80)  NOT NULL DEFAULT '',
+  title      VARCHAR(60)  NOT NULL DEFAULT '',
+  phone      VARCHAR(30)  NOT NULL DEFAULT '',
+  email      VARCHAR(120) NOT NULL DEFAULT '',
+  memo       VARCHAR(200) NOT NULL DEFAULT '',
+  shared     TINYINT(1)   NOT NULL DEFAULT 0,         -- 1 이면 전 직원에게 보인다
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted_at DATETIME NULL,
+  KEY idx_contacts_owner (owner_id),
+  FOREIGN KEY (owner_id) REFERENCES users(id)
+) ENGINE=InnoDB;
+
 -- 상신자 본인을 결재선에 넣을 수 없다(앱 검사의 이중 방어). 결재자 열은 앱 계정이 수정할 수 없다(grants.sql).
 DELIMITER //
 CREATE TRIGGER trg_steps_no_self_approval BEFORE INSERT ON approval_steps
@@ -156,6 +426,29 @@ FOR EACH ROW
 BEGIN
   IF NEW.approver_id = (SELECT requester_id FROM approvals WHERE id = NEW.approval_id) THEN
     SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'requester cannot be an approver of own request';
+  END IF;
+END//
+DELIMITER ;
+
+-- 최상위 권한 고정: 보안관제팀 소속과 시스템관리자(admin) 계정은 만들 때 admin 역할 + pinned 로 정해지고, 이후 역할을 낮추거나 pinned 를 풀 수 없다
+-- (앱 계정도, 이 트리거를 지우지 않는 한 root 도 못 바꾼다). 소속 부서는 앱 계정이 바꿀 수 없으므로(grants.sql) 부서 이동으로 빠져나갈 수도 없다.
+DELIMITER //
+CREATE TRIGGER trg_users_pin_insert BEFORE INSERT ON users
+FOR EACH ROW
+BEGIN
+  IF NEW.dept = '보안관제팀' OR NEW.username = 'admin' THEN
+    SET NEW.role = 'admin';
+    SET NEW.pinned = 1;
+  END IF;
+END//
+CREATE TRIGGER trg_users_pin_update BEFORE UPDATE ON users
+FOR EACH ROW
+BEGIN
+  IF OLD.pinned = 1 AND (NEW.role <> 'admin' OR NEW.pinned <> 1) THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'pinned account keeps the admin role';
+  END IF;
+  IF OLD.pinned = 0 AND NEW.pinned = 1 AND NEW.role <> 'admin' THEN
+    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'pinned account must be admin';
   END IF;
 END//
 DELIMITER ;

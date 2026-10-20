@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}프로필 사진 · NEXUS WORK{% endblock %}
+{% block content %}
+<h1>프로필 사진</h1>
+<div class="sheet narrow">
+  {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+  {% if notice %}<p class="notice" role="status">{{ notice }}</p>{% endif %}
+  <div class="avatar-edit">
+    <span class="avatar avatar-lg" aria-hidden="true">
+      {% if has_photo %}<img src="{{ url_for('profile.photo_view', user_id=g.user.id) }}" alt="">{% else %}{{ g.user.display_name[:1] }}{% endif %}
+    </span>
+    <p class="hint">{% if has_photo %}지금 쓰는 사진입니다.{% else %}아직 사진이 없어 이름의 첫 글자가 보입니다.{% endif %}</p>
+  </div>
+  <form method="post" action="{{ url_for('profile.photo_upload') }}" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>사진 선택 (png, jpg · 2MB 이하)
+      <input type="file" name="photo" id="photo" accept=".png,.jpg" required>
+    </label>
+    <div id="photo-preview" class="attach-preview" hidden></div>
+    <div class="actions"><button type="submit" class="btn primary">저장</button></div>
+  </form>
+  {% if has_photo %}
+  <form method="post" action="{{ url_for('profile.photo_delete') }}" class="actions">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn danger">사진 삭제</button>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='photo-preview.js') }}" defer></script>{% endblock %}

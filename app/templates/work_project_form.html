@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}프로젝트 만들기 · NEXUS WORK{% endblock %}
+{% block content %}
+<a class="crumb" href="{{ url_for('work.project_list') }}">&larr; 프로젝트</a>
+<h1>프로젝트 만들기</h1>
+<div class="sheet narrow">
+  {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+  <form method="post" action="{{ url_for('work.project_new') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>이름 <input name="name" required maxlength="80" value="{{ values.get('name', '') }}"></label>
+    <label>설명 <textarea name="description" rows="4" maxlength="500">{{ values.get('description', '') }}</textarea></label>
+    <label>시작일 (선택, YYYY-MM-DD) <input name="start_date" maxlength="10" pattern="\d{4}-\d{2}-\d{2}" value="{{ values.get('start_date', '') }}"></label>
+    <label>종료 예정일 (선택) <input name="end_date" maxlength="10" pattern="\d{4}-\d{2}-\d{2}" value="{{ values.get('end_date', '') }}"></label>
+    <p class="hint">만든 사람이 책임자가 되고 첫 구성원이 됩니다. 구성원은 만든 뒤에 추가합니다.</p>
+    <div class="actions"><button type="submit" class="btn primary">만들기</button></div>
+  </form>
+</div>
+{% endblock %}
