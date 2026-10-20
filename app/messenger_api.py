@@ -7,12 +7,14 @@
 - 대화방 접근은 매 요청 conversation_members 로 재확인한다(세션 로그인과 같은 원칙:
   멤버 목록을 캐시하거나 토큰 안에 담지 않는다).
 """
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from flask import Blueprint, current_app, g, jsonify, request
 
-from . import auth, db, validators
+from . import auth, db, uploads, validators
 from .realtime import broadcast_message, join_new_conversation
 from .security import ip_rate_limited, log_event
 
@@ -21,6 +23,9 @@ bp = Blueprint("messenger_api", __name__, url_prefix="/api/v1")
 TOKEN_TTL_DAYS = 30
 MAX_MESSAGE = 4000
 MAX_GROUP_MEMBERS = 50
+UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+FILE_PREFIX = "[FILE|"
+FILE_MSG_RE = re.compile(r"^\[FILE\|([0-9a-f-]{36})\|(\d+)\|([^|\]]+)\|([^|\]]+)\]")
 
 
 def _err(code, message, status):
@@ -223,6 +228,10 @@ def send_message(conversation_id):
         text = validators.text(str(body.get("body", "")), "message", 1, MAX_MESSAGE, multiline=True)
     except ValueError:
         return _err("invalid_body", f"메시지는 1~{MAX_MESSAGE}자로 입력하세요(제어문자 사용 불가).", 400)
+    if text.startswith(FILE_PREFIX):
+        # 파일 메시지는 send_file 만 만든다. 글 메시지로 흉내 내면 남의 업로드 파일 이름으로 다운로드 권한을 얻을 수 있다.
+        log_event("messenger_authz_deny", "DENY", "forged_file_message", resource=f"conversation:{conversation_id}")
+        return _err("invalid_body", "파일은 파일 전송으로 보내세요.", 400)
 
     msg_id = db.execute("INSERT INTO messenger_messages(conversation_id, sender_id, body) VALUES(%s, %s, %s)",
                         (conversation_id, g.user["id"], text))
@@ -234,3 +243,67 @@ def send_message(conversation_id):
     log_event("messenger_message_sent", "INFO", "ok", conversation_id=conversation_id, chars=len(text))
     broadcast_message(conversation_id, payload)
     return jsonify(message=payload), 201
+
+
+@bp.post("/conversations/<int:conversation_id>/files")
+@token_required
+def send_file(conversation_id):
+    if not _is_member(conversation_id, g.user["id"]):
+        log_event("messenger_authz_deny", "DENY", "not_member", resource=f"conversation:{conversation_id}")
+        return _err("forbidden", "접근 권한이 없습니다.", 403)
+    if ip_rate_limited(f"msg:{g.user['id']}", current_app.config.get("CHAT_USER_LIMIT", 20)):
+        log_event("rate_limited", "BLOCK", "messenger_user_limit")
+        return _err("rate_limited", "파일을 너무 빠르게 보내고 있습니다.", 429)
+    storage = request.files.get("file")
+    if not storage or not storage.filename:
+        return _err("invalid_file", "전송할 파일을 선택하세요.", 400)
+    caption_raw = (request.form.get("caption") or "").strip()
+    caption = ""
+    if caption_raw:
+        try:
+            caption = validators.text(caption_raw, "caption", 1, 1000, multiline=True)
+        except ValueError:
+            return _err("invalid_caption", "설명 메시지가 올바르지 않습니다.", 400)
+
+    upload_dir = Path(current_app.config["UPLOAD_DIR"])
+    meta = uploads.save_attachment(upload_dir, storage)
+    text = f"[FILE|{meta['stored_name']}|{meta['size']}|{meta['mime']}|{meta['orig_name']}]"
+    if caption:
+        text = f"{text}\n{caption}"
+    try:
+        msg_id = db.execute("INSERT INTO messenger_messages(conversation_id, sender_id, body) VALUES(%s, %s, %s)",
+                            (conversation_id, g.user["id"], text))
+        db.execute("UPDATE conversation_members SET last_read_message_id = %s WHERE conversation_id = %s AND user_id = %s",
+                  (msg_id, conversation_id, g.user["id"]))
+        row = db.query_one("SELECT created_at FROM messenger_messages WHERE id = %s", (msg_id,))
+    except BaseException:
+        uploads.remove_saved(upload_dir, [meta])
+        raise
+    payload = {"id": msg_id, "conversation_id": conversation_id, "sender_id": g.user["id"],
+              "sender_name": g.user["display_name"], "body": text, "created_at": row["created_at"].isoformat()}
+    log_event("messenger_file_sent", "INFO", "ok", conversation_id=conversation_id,
+              bytes=meta["size"], mime=meta["mime"])
+    broadcast_message(conversation_id, payload)
+    return jsonify(message=payload), 201
+
+
+@bp.get("/conversations/<int:conversation_id>/files/<stored_name>")
+@token_required
+def download_file(conversation_id, stored_name):
+    if not _is_member(conversation_id, g.user["id"]):
+        log_event("messenger_authz_deny", "DENY", "not_member", resource=f"conversation:{conversation_id}")
+        return _err("forbidden", "접근 권한이 없습니다.", 403)
+    if not UUID_RE.match(stored_name or ""):
+        return _err("not_found", "파일을 찾을 수 없습니다.", 404)
+    row = db.query_one(
+        "SELECT body FROM messenger_messages WHERE conversation_id = %s AND body LIKE %s LIMIT 1",
+        (conversation_id, f"[FILE|{stored_name}|%"))
+    directory = Path(current_app.config["UPLOAD_DIR"])
+    if not row or not (directory / stored_name).is_file():
+        return _err("not_found", "파일을 찾을 수 없습니다.", 404)
+    m = FILE_MSG_RE.match(row["body"] or "")
+    orig_name = m.group(4) if m else "attachment"
+    mime = m.group(3) if m else "application/octet-stream"
+    log_event("messenger_file_download", "INFO", "ok", conversation_id=conversation_id)
+    return uploads.send_stored(directory, stored_name, as_attachment=True,
+                               download_name=orig_name, mimetype=mime)

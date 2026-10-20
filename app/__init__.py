@@ -46,6 +46,9 @@ def create_app(overrides=None):
         else ai.select_responder(app.config)
     )
     app.config.setdefault("CHAT_RESPONDER", default_responder)
+    if not app.config.get("TESTING"):
+        from nexus_team_integration import init_app as init_team_integration
+        init_team_integration(app)
     app.jinja_env.filters["won"] = lambda n: f"{int(n):,}원"
     app.jinja_env.filters["hangul_won"] = formats.won_hangul
     app.jinja_env.filters["status_label"] = lambda s: STATUS_LABEL.get(s, s)
