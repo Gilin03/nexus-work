@@ -45,3 +45,11 @@ def test_init_app_is_off_by_default(app, monkeypatch):
     before = app.config["CHAT_RESPONDER"]
     nti.init_app(app)
     assert app.extensions["nexus_team_integration"] == {} and app.config["CHAT_RESPONDER"] is before
+
+
+def test_gelf_forwards_detection_extras_but_not_secrets():
+    event = {"ts": "2026-10-20T04:00:00Z", "event_type": "admin_action", "target": "kim", "old": "A팀", "new": "보안관제팀",
+             "markers": "NXC-MNA-7Q4K", "has_token": True, "token": "nxapi_secret", "password": "x"}
+    out = json.loads(nti.gelf(event, "s"))
+    assert out["_target"] == "kim" and out["_new"] == "보안관제팀" and out["_markers"] == "NXC-MNA-7Q4K" and out["_has_token"] == 1
+    assert "_token" not in out and "_password" not in out

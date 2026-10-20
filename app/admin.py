@@ -50,7 +50,7 @@ def require_admin():
 @bp.get("/users")
 def users():
     rows = db.query_all(
-        "SELECT u.id, u.username, u.display_name, u.dept, u.role, u.pinned, u.failed_count, u.created_at, e.title, "
+        "SELECT u.id, u.username, u.display_name, u.dept, u.role, u.pinned, u.ai_restricted, u.failed_count, u.created_at, e.title, "
         "(u.locked_until IS NOT NULL AND u.locked_until > NOW()) AS is_locked "
         "FROM users u LEFT JOIN employees e ON e.user_id = u.id WHERE u.deleted_at IS NULL "
         "ORDER BY u.pinned DESC, u.dept, u.role, u.username LIMIT 500")
