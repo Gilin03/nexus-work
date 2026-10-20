@@ -29,6 +29,8 @@ COLUMNS = {
 GRANTS = [
     "GRANT UPDATE (title) ON `{db}`.employees TO 'nexus_app'@'%'",
     "GRANT UPDATE (deleted_at, deleted_by) ON `{db}`.users TO 'nexus_app'@'%'",
+    "GRANT UPDATE (dept) ON `{db}`.users TO 'nexus_app'@'%'",                 # 부서 변경(관리 화면)
+    "GRANT UPDATE (dept) ON `{db}`.employees TO 'nexus_app'@'%'",
 ]
 TRIGGERS = ("trg_users_pin_insert", "trg_users_pin_update")
 

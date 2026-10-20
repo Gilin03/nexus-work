@@ -28,7 +28,8 @@ from . import audit, db, validators
 from .approvals import conflict, forbidden
 from .auth import hash_password
 from .hr import today_kst
-from .permissions import ALLOWED_TITLES, DEFAULT_TITLE, PINNED_USERS, RANKS, SECURITY_TEAM, can, matrix, permission_required
+from .permissions import (ALLOWED_TITLES, DEFAULT_TITLE, FINANCE_TEAMS, HR_TEAMS, PINNED_USERS, RANKS, SECURITY_TEAM, can, matrix,
+                          permission_required)
 from .security import log_event
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -57,7 +58,8 @@ def users():
         "SELECT u.id, u.username, u.display_name, u.dept, u.deleted_at, d.username AS deleted_by FROM users u "
         "LEFT JOIN users d ON d.id = u.deleted_by WHERE u.deleted_at IS NOT NULL ORDER BY u.deleted_at DESC LIMIT 200")
     return render_template("admin_users.html", rows=rows, roles=ROLES, titles=ALLOWED_TITLES, deleted=deleted,
-                           can_delete=can(g.user, "users.delete"))
+                           can_delete=can(g.user, "users.delete"), depts=dept_options(), new_dept=NEW_DEPT,
+                           me_pinned=bool(g.user.get("pinned")))
 
 
 @bp.post("/users/<int:user_id>/role")
@@ -94,6 +96,38 @@ def _sync_title(user_id, role):
     row = db.query_one("SELECT title FROM employees WHERE user_id = %s FOR UPDATE", (user_id,))
     if row and row["title"] not in ALLOWED_TITLES[role]:
         db.execute_rowcount("UPDATE employees SET title = %s WHERE user_id = %s", (DEFAULT_TITLE[role], user_id))
+
+
+@bp.post("/users/<int:user_id>/dept")
+def change_dept(user_id):
+    """부서 변경(인사발령). 계정과 인사카드의 부서를 함께 바꾼다. 부서는 팀 권한·팀 일정·보안관제팀 권한을 정하므로
+    본인 부서는 바꿀 수 없고, 고정 계정(admin·hongjh)의 부서는 최고관리자만 바꾼다. 화면을 연 사이 바뀌었으면 덮어쓰지 않는다."""
+    raw = request.form.get("new_dept", "") if request.form.get("dept") == NEW_DEPT else request.form.get("dept", "")
+    expected = request.form.get("current_dept", "")
+    try:
+        new_dept = validators.text(raw, "dept", 1, 64)
+    except ValueError as exc:
+        log_event("input_rejected", "DENY", str(exc), field="dept_change")
+        return conflict("부서는 1~64자로 고르거나 입력하세요(새 부서는 이름을 입력).")
+    if user_id == g.user["id"]:
+        log_event("admin_action", "DENY", "self_change", action="dept_change", target=g.user["username"])
+        return forbidden("self_dept_change", resource=f"user:{user_id}")
+    target = db.query_one("SELECT id, username, dept, pinned FROM users WHERE id = %s AND deleted_at IS NULL FOR UPDATE", (user_id,))
+    if not target:
+        abort(404)
+    if target["pinned"] and not g.user.get("pinned"):
+        log_event("admin_action", "DENY", "pinned_account", action="dept_change", target=target["username"])
+        return forbidden("pinned_account", resource=f"user:{user_id}")
+    if target["dept"] != expected:
+        log_event("admin_action", "DENY", "stale_form", action="dept_change", target=target["username"])
+        return conflict("다른 곳에서 이미 변경된 사용자입니다. 목록을 새로 고친 뒤 다시 시도하세요.")
+    if target["dept"] == new_dept:
+        return redirect(url_for("admin.users"), 303)
+    if db.execute_rowcount("UPDATE users SET dept = %s WHERE id = %s AND dept = %s", (new_dept, user_id, expected)) != 1:
+        return conflict("다른 곳에서 이미 변경된 사용자입니다. 목록을 새로 고친 뒤 다시 시도하세요.")
+    db.execute_rowcount("UPDATE employees SET dept = %s WHERE user_id = %s", (new_dept, user_id))
+    log_event("admin_action", "ALLOW", "dept_change", action="dept_change", target=target["username"], old=expected, new=new_dept)
+    return redirect(url_for("admin.users"), 303)
 
 
 @bp.post("/users/<int:user_id>/title")
@@ -152,20 +186,30 @@ def _credentials(user, password, created, restored=False):
     return render_template("admin_credentials.html", target=user, password=password, created=created, restored=restored)
 
 
+NEW_DEPT = "__new__"   # 부서 목록의 "새 부서 직접 입력" 값
+
+
+def dept_options():
+    """사용자 등록 화면의 부서 목록: 권한 규칙이 이름으로 보는 부서 + 지금 계정(삭제된 계정 제외)·인사카드에 있는 부서."""
+    rows = db.query_all("SELECT dept FROM users WHERE deleted_at IS NULL UNION SELECT dept FROM employees")
+    return sorted({SECURITY_TEAM, *FINANCE_TEAMS, *HR_TEAMS} | {r["dept"] for r in rows if r["dept"]})
+
+
 def _new_form(error=None, status=200, values=None):
     return render_template("admin_user_new.html", roles=ROLES, titles=TITLES, ranks=RANKS, security_team=SECURITY_TEAM, error=error,
-                           values=values or {}), status
+                           values=values or {}, depts=dept_options(), new_dept=NEW_DEPT), status
 
 
 @bp.route("/users/new", methods=["GET", "POST"])
 def user_new():
     if request.method == "GET":
         return _new_form()
-    values = {k: request.form.get(k, "") for k in ("username", "display_name", "dept", "role", "title")}
+    values = {k: request.form.get(k, "") for k in ("username", "display_name", "dept", "new_dept", "role", "title")}
     try:
         username = validators.username(values["username"])
         display_name = validators.text(values["display_name"], "display_name", 1, 64)
-        dept = validators.text(values["dept"], "dept", 1, 64)
+        # 목록에서 고르거나, "새 부서 직접 입력"을 고르면 새 부서 이름 칸의 값을 쓴다.
+        dept = validators.text(values["new_dept"] if values["dept"] == NEW_DEPT else values["dept"], "dept", 1, 64)
         if values["role"] not in ROLES:
             raise ValueError("role")
         role = values["role"]
@@ -174,7 +218,7 @@ def user_new():
             raise ValueError("title")
     except ValueError as exc:
         log_event("input_rejected", "DENY", str(exc), field="user_create")
-        return _new_form("아이디는 영문 소문자로 시작하는 3~32자(소문자·숫자·밑줄), 이름·부서는 1~64자, 역할·직급은 목록에서 선택하세요"
+        return _new_form("아이디는 영문 소문자로 시작하는 3~32자(소문자·숫자·밑줄), 이름·부서는 1~64자(새 부서는 이름을 입력), 역할·직급은 목록에서 선택하세요"
                          "(직급은 역할에 맞아야 합니다: 직원=사원·대리·과장, 팀장=팀장, 관리자=관리자).", 400, values)
     if db.query_one("SELECT id FROM users WHERE username = %s", (username,)):
         log_event("admin_action", "DENY", "duplicate_username", action="user_create", target=username)

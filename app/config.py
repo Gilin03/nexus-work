@@ -38,6 +38,8 @@ class Config:
         self.UPLOAD_MAX_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", "0") or 0) or None
         self.UPLOAD_DIR = Path(os.environ.get("UPLOAD_DIR", BASE_DIR / "instance" / "uploads"))
         self.LOG_DIR = Path(os.environ.get("LOG_DIR", BASE_DIR / "logs"))
+        # 메신저 자동 업데이트로 내줄 설치 파일(같은 폴더에 서명 파일 <이름>.sig 가 있어야 내준다). 기본은 저장소 옆(바탕화면)
+        self.MESSENGER_SETUP_PATH = Path(os.environ.get("MESSENGER_SETUP_PATH", BASE_DIR.parent / "NEXUS_Messenger_Setup.exe"))
 
         # 로그인 방어
         self.LOGIN_MAX_FAILURES = 5

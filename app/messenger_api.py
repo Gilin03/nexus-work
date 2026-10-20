@@ -7,6 +7,7 @@
 - 대화방 접근은 매 요청 conversation_members 로 재확인한다(세션 로그인과 같은 원칙:
   멤버 목록을 캐시하거나 토큰 안에 담지 않는다).
 """
+import json
 import re
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -23,6 +24,7 @@ bp = Blueprint("messenger_api", __name__, url_prefix="/api/v1")
 TOKEN_TTL_DAYS = 30
 MAX_MESSAGE = 4000
 MAX_GROUP_MEMBERS = 50
+PHOTO_MAX_BYTES = 10 * 1024 * 1024   # 메신저에서 올리는 프로필 사진 상한
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 FILE_PREFIX = "[FILE|"
 FILE_MSG_RE = re.compile(r"^\[FILE\|([0-9a-f-]{36})\|(\d+)\|([^|\]]+)\|([^|\]]+)\]")
@@ -307,3 +309,124 @@ def download_file(conversation_id, stored_name):
     log_event("messenger_file_download", "INFO", "ok", conversation_id=conversation_id)
     return uploads.send_stored(directory, stored_name, as_attachment=True,
                                download_name=orig_name, mimetype=mime)
+
+
+# ---------- 메신저 자동 업데이트 ----------
+# 설치 파일은 서명 파일(<설치 파일>.sig)이 함께 있고 그 해시가 실제 파일과 맞을 때만 내준다. 클라이언트는 내장한 공개키로
+# 서명을 확인한 뒤에만 실행한다(포털이 HTTP 라 중간에서 파일을 바꿔치기해도 서명이 맞지 않아 실행되지 않는다).
+# 서명은 scripts/sign_messenger_setup.py 로 하고 개인키는 저장소 밖(사용자 폴더)에만 둔다.
+UPDATE_SIG_FORMAT = "nexus-messenger-update-v1"
+_setup_hash_cache = {}
+
+
+def _setup_path() -> Path:
+    return Path(current_app.config["MESSENGER_SETUP_PATH"])
+
+
+def _signed_setup():
+    """(설치 파일 경로, 정보) 또는 None. 정보: 크기·sha256·서명·빌드 시각. 서명 파일이 없거나 해시가 다르면 None."""
+    path = _setup_path()
+    sig_path = path.with_name(path.name + ".sig")
+    if not path.is_file() or not sig_path.is_file():
+        return None
+    st = path.stat()
+    key = (str(path), st.st_mtime_ns, st.st_size)
+    if key not in _setup_hash_cache:
+        _setup_hash_cache.clear()
+        digest = __import__("hashlib").sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                digest.update(chunk)
+        _setup_hash_cache[key] = digest.hexdigest()
+    try:
+        sig = json.loads(sig_path.read_text(encoding="utf-8"))
+        ok = (sig.get("format") == UPDATE_SIG_FORMAT and sig.get("sha256") == _setup_hash_cache[key]
+              and sig.get("size") == st.st_size and isinstance(sig.get("signature"), str))
+    except (OSError, ValueError, AttributeError):
+        ok = False
+    if not ok:
+        log_event("messenger_client_update_unsigned", "WARN", "signature_missing_or_mismatch")
+        return None
+    return path, {"size": st.st_size, "sha256": _setup_hash_cache[key], "signature": sig["signature"],
+                  "build_timestamp": int(st.st_mtime)}
+
+
+@bp.get("/client/version")
+@token_required
+def client_version():
+    signed = _signed_setup()
+    if not signed:
+        return jsonify(available=False, build_timestamp=0, size=0)
+    return jsonify(available=True, format=UPDATE_SIG_FORMAT, **signed[1])
+
+
+@bp.get("/client/setup")
+@token_required
+def client_setup_download():
+    signed = _signed_setup()
+    if not signed:
+        return _err("not_found", "업데이트 설치 파일이 준비되지 않았습니다.", 404)
+    path, info = signed
+    log_event("messenger_client_update_download", "INFO", "ok", bytes=info["size"])
+    return uploads.send_stored(path.parent, path.name, as_attachment=True,
+                               download_name="NEXUS_Messenger_Setup.exe", mimetype="application/octet-stream")
+
+
+def _photo_dir() -> Path:
+    return Path(current_app.config["UPLOAD_DIR"]) / "avatars"
+
+
+@bp.get("/users/<int:user_id>/photo")
+@token_required
+def get_user_photo(user_id):
+    row = db.query_one("SELECT stored_name, mime FROM profile_photos WHERE user_id = %s", (user_id,))
+    pdir = _photo_dir()
+    if not row or not (pdir / row["stored_name"]).is_file():
+        return _err("not_found", "프로필 사진이 없습니다.", 404)
+    return uploads.send_stored(pdir, row["stored_name"], as_attachment=True,
+                               download_name="avatar", mimetype=row["mime"])
+
+
+@bp.post("/account/photo")
+@token_required
+def upload_profile_photo():
+    upload = request.files.get("photo")
+    if not upload or not upload.filename:
+        return _err("empty_upload", "파일을 선택하세요.", 400)
+    data = upload.read(PHOTO_MAX_BYTES + 1)              # 본문 상한(security.ENDPOINT_LIMITS)을 넘으면 그 전에 413 이 난다
+    if len(data) > PHOTO_MAX_BYTES:
+        return _err("too_large", "프로필 사진은 10MB 이하만 올릴 수 있습니다.", 400)
+    # 원래 이름 그대로 검사해야 이중 확장자(shell.php.png) 같은 거부 규칙이 웹과 똑같이 걸린다. .jpeg 만 .jpg 로 맞춘다.
+    name = upload.filename[:-5] + ".jpg" if upload.filename.lower().endswith(".jpeg") else upload.filename
+    try:
+        ext, mime, _display, digest = uploads.inspect_upload(name, data)
+        if ext not in ("png", "jpg"):
+            raise ValueError("extension_not_allowed")
+    except ValueError as exc:
+        log_event("upload_reject", "BLOCK", str(exc), filename=upload.filename[:100], size=len(data), target="profile_photo")
+        return _err("invalid_photo", "올바른 PNG 또는 JPG 이미지 파일이 아닙니다.", 400)
+
+    pdir = _photo_dir()
+    old = db.query_one("SELECT stored_name FROM profile_photos WHERE user_id = %s FOR UPDATE", (g.user["id"],))
+    stored = uploads.store(pdir, data)
+    db.execute("DELETE FROM profile_photos WHERE user_id = %s", (g.user["id"],))
+    db.execute("INSERT INTO profile_photos(user_id, stored_name, mime, size, sha256) VALUES(%s, %s, %s, %s, %s)",
+               (g.user["id"], stored, mime, len(data), digest))
+    db.commit()
+    if old:
+        (pdir / old["stored_name"]).unlink(missing_ok=True)
+    log_event("profile_photo_changed", "INFO", "ok", size=len(data), replaced=bool(old))
+    return jsonify(ok=True, mime=mime, size=len(data)), 200
+
+
+@bp.delete("/account/photo")
+@token_required
+def delete_profile_photo():
+    pdir = _photo_dir()
+    old = db.query_one("SELECT stored_name FROM profile_photos WHERE user_id = %s FOR UPDATE", (g.user["id"],))
+    if old:
+        db.execute("DELETE FROM profile_photos WHERE user_id = %s", (g.user["id"],))
+        db.commit()
+        (pdir / old["stored_name"]).unlink(missing_ok=True)
+        log_event("profile_photo_removed", "INFO", "ok")
+    return jsonify(ok=True), 200

@@ -14,8 +14,16 @@
     <label>이름
       <input name="display_name" required maxlength="64" value="{{ values.get('display_name', '') }}">
     </label>
+    {% set cur = values.get('dept', '') %}
     <label>부서
-      <input name="dept" required maxlength="64" value="{{ values.get('dept', '') }}">
+      <select name="dept" id="dept" required data-new-dept="new-dept" data-new-field="new-dept-field">
+        <option value="">부서 선택</option>
+        {% for dp in depts %}<option value="{{ dp }}"{% if cur == dp %} selected{% endif %}>{{ dp }}</option>{% endfor %}
+        <option value="{{ new_dept }}"{% if cur == new_dept %} selected{% endif %}>새 부서 직접 입력</option>
+      </select>
+    </label>
+    <label id="new-dept-field">새 부서 이름 (목록에 없을 때만)
+      <input name="new_dept" id="new-dept" maxlength="64" value="{{ values.get('new_dept', '') }}" autocomplete="off">
     </label>
     <label>역할
       <select name="role" required>
@@ -33,3 +41,4 @@
   </form>
 </div>
 {% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='dept-select.js') }}" defer></script>{% endblock %}

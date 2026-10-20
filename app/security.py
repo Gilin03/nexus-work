@@ -105,6 +105,8 @@ def check_csrf():
 # 첨부를 받는 요청만 상한을 푼다(설정 UPLOAD_MAX_BYTES, 비어 있으면 제한 없음). 나머지 요청은 MAX_CONTENT_LENGTH(2MB)가 그대로 적용된다.
 # 폼의 글자 칸 크기(500KB)와 한 요청의 폼 항목 수(1000)는 프레임워크 기본 보호를 유지한다.
 UPLOAD_ENDPOINTS = ("portal.post_new", "approvals.approval_new", "approvals.approval_decide", "library.file_upload", "library.form_upload", "messenger_api.send_file")
+# 첨부와 달리 상한이 따로 있는 요청: 본문을 메모리로 다 읽기 전에 413 으로 끊는다.
+ENDPOINT_LIMITS = {"messenger_api.upload_profile_photo": 10 * 1024 * 1024 + 64 * 1024}   # 사진 10MB + multipart 머리
 
 
 NO_LIMIT = 1 << 62  # Flask 는 max_content_length=None 을 "설정 파일의 값을 쓴다"로 해석하므로, 제한 없음은 사실상 무한대 값으로 표현한다
@@ -113,6 +115,8 @@ NO_LIMIT = 1 << 62  # Flask 는 max_content_length=None 을 "설정 파일의 �
 def apply_upload_limit():
     if request.endpoint in UPLOAD_ENDPOINTS:
         request.max_content_length = current_app.config["UPLOAD_MAX_BYTES"] or NO_LIMIT
+    elif request.endpoint in ENDPOINT_LIMITS:
+        request.max_content_length = ENDPOINT_LIMITS[request.endpoint]
 
 
 # ---- 응답 헤더 ----
