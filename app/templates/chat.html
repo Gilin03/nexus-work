@@ -21,7 +21,7 @@
   {% endif %}
 
   {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
-  <form method="post" action="{{ url_for('chat.chat_send') }}" class="composer">
+  <form method="post" action="{{ url_for('chat.chat_send') }}" class="composer" enctype="multipart/form-data">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     {% if ai_options %}
     <label>AI 모델 선택
@@ -35,6 +35,10 @@
     <label>메시지
       <textarea name="message" required maxlength="{{ max_message }}" rows="3"></textarea>
     </label>
+    <label>파일 첨부 (선택)
+      <input type="file" name="attachment" accept="{{ attach_accept }}">
+    </label>
+    <p class="hint">{{ attach_exts | join('·') }} 파일, {{ attach_mb }}MB 까지. 파일은 저장하지 않고 글자({{ '{:,}'.format(attach_chars) }}자까지)만 뽑아 이번 질문에만 참고합니다. 다음 질문에서도 쓰려면 다시 첨부하세요.</p>
     <p class="hint">{{ '{:,}'.format(max_message) }}자까지, 분당 {{ limit }}번까지 보낼 수 있습니다. 대화 기록은 본인만 볼 수 있습니다.</p>
     <button type="submit" class="btn primary" data-busy="답변 생성 중… (로컬 모델은 최대 1분)">보내기</button>
     <p class="hint" id="chat-busy" role="status" hidden>답변을 만드는 중입니다. 이 화면을 닫지 마세요.</p>

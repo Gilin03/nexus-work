@@ -53,7 +53,7 @@ def test_no_route_is_accidentally_public(app, client):
         if rule.endpoint == "static":
             continue
         path = re.sub(r"<[^>]+>", "1", rule.rule)
-        is_token_api = path.startswith("/api/v1/")
+        is_token_api = path.startswith("/api/v1/") or path.startswith("/internal/api/v1/")   # 내부 API 도 Authorization 토큰 체계다
         for method in rule.methods - {"HEAD", "OPTIONS"}:
             r = client.open(path, method=method)
             if is_token_api:
@@ -101,7 +101,7 @@ def _text(path):
 
 def test_real_secret_values_never_appear_in_publishable_files(publishable):
     env, example = dotenv_values(ROOT / ".env"), dotenv_values(ROOT / ".env.example")
-    secrets = {v for k, v in env.items() if v and len(v) >= 8 and re.search(r"PASSWORD|SECRET|KEY|TOKEN", k, re.I)
+    secrets = {v for k, v in env.items() if v and len(v) >= 8 and re.search(r"PASSWORD|SECRET|KEY|TOKEN|FLAG", k, re.I)
                and v != example.get(k)}                       # .env.example 과 같은 값(공개된 시험용 값)은 제외
     if not env:
         pytest.skip(".env 없음")

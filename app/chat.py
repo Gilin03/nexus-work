@@ -8,10 +8,11 @@
 - 응답이 오래 걸리면 호출 쪽 요청이 그동안 묶인다. 실제 구현은 자체 시간 제한을 둔다.
 
 앱이 지키는 것: 로그인 필요, CSRF, 입력 길이·문자 검증, 사용자당 속도 제한, 대화 기록은 본인 것만 조회·표시, 응답도 이스케이프.
-대화 내용은 DB(chat_messages)에만 저장하고 보안 로그에는 글자 수만 남긴다."""
+대화 내용은 DB(chat_messages)에만 저장하고 보안 로그에는 글자 수만 남긴다.
+첨부 파일(chat_attach)은 저장하지 않고 뽑은 글자를 g.chat_attachment 로 응답기에 넘긴다(그 질문에만 쓰인다)."""
 from flask import Blueprint, current_app, g, redirect, render_template, request, url_for
 
-from . import db, validators
+from . import chat_attach, db, validators
 from .auth import login_required
 from .security import ip_rate_limited, log_event
 
@@ -49,7 +50,9 @@ def _render(error=None, status=200):
                            ai_badge=None if is_placeholder else ai.provider_badge(current_app.config),
                            ai_options=[] if is_placeholder else ai.provider_options(current_app.config),
                            ai_selected=ai.selected_choice(current_app.config),
-                           max_message=MAX_MESSAGE, limit=current_app.config["CHAT_USER_LIMIT"]), status
+                           max_message=MAX_MESSAGE, limit=current_app.config["CHAT_USER_LIMIT"],
+                           attach_accept=chat_attach.ACCEPT, attach_exts=sorted(chat_attach.ALLOWED_EXTS),
+                           attach_mb=chat_attach.MAX_BYTES // (1024 * 1024), attach_chars=chat_attach.MAX_CHARS), status
 
 
 @bp.get("/chat")
@@ -70,10 +73,22 @@ def chat_send():
     except ValueError as exc:
         log_event("input_rejected", "DENY", str(exc), field="chat")
         return _render(MESSAGE_ERROR, 400)
+    attachment, note = None, ""
+    storage = request.files.get("attachment")
+    if storage and storage.filename:
+        data = storage.read(chat_attach.MAX_BYTES + 1)
+        try:
+            attachment = chat_attach.extract(storage.filename, data)
+        except ValueError as exc:
+            log_event("upload_reject", "BLOCK", str(exc), target="chat_attachment", size=len(data))
+            return _render(chat_attach.MESSAGES.get(str(exc), "첨부 파일을 읽지 못했습니다."), 400)
+        g.chat_attachment = attachment
+        note = f"\n\n[첨부 파일: {attachment['name']}, {attachment['chars']:,}자{' (길어서 앞부분만)' if attachment['truncated'] else ''}]"
+        log_event("chat_attachment", "INFO", "ok", ext=attachment["ext"], size=len(data), chars=attachment["chars"])
 
     history = [{"sender": r["sender"], "content": r["content"]} for r in _history(user["id"], HISTORY_FOR_RESPONDER)]
     # 사용자 메시지는 응답을 기다리기 전에 먼저 확정한다(응답 생성이 실패·지연되어도 기록은 남는다).
-    db.execute("INSERT INTO chat_messages(user_id, sender, content) VALUES(%s, 'user', %s)", (user["id"], message))
+    db.execute("INSERT INTO chat_messages(user_id, sender, content) VALUES(%s, 'user', %s)", (user["id"], message + note))
     db.commit()
     log_event("chat_message", "INFO", "ok", chars=len(message))
 
