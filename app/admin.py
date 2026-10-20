@@ -1,11 +1,17 @@
-"""관리자(시스템 관리): 관리 현황, 사용자 관리(등록·역할 변경·비밀번호 초기화·잠금·잠금 해제), 감사 로그, 권한 현황.
+"""관리자(시스템 관리): 관리 현황, 사용자 관리(등록·역할 변경·비밀번호 초기화·잠금·잠금 해제·삭제), 보안 대시보드, 권한 현황.
 - 계정 등록·비밀번호 초기화는 임시 비밀번호를 무작위로 만들어 그 응답 화면에 한 번만 보여 준다(DB 에는 해시만, 로그에는 값 없음).
 - 본인 계정은 역할 변경·비밀번호 초기화·잠금 대상이 될 수 없다(본인 비밀번호는 비밀번호 변경 화면에서).
 - /admin/* 는 블루프린트 단위로 role=admin 을 서버에서 검사한다(새 경로를 추가해도 검사를 빼먹을 수 없다). 숨은 URL 에 의존하지 않는다.
 - 변경은 POST + CSRF 만 허용하고, 모든 변경과 거부는 admin_action 이벤트로 남긴다.
 - 자기 자신의 역할은 바꿀 수 없다(자기 강등·승격 금지). 이로써 관리자가 0명이 되는 일도 없다(실행하는 관리자 본인이 남는다).
 - 역할은 즉시 반영된다(사용자·역할은 요청마다 DB 에서 다시 읽는다). 비밀번호 해시는 화면에 내보내지 않는다.
-- 고정 계정(보안관제팀 소속·시스템관리자, users.pinned): 역할 변경·수동 잠금·비밀번호 초기화를 이 화면에서 할 수 없다(앱 검사 + DB 트리거). 보안관제팀 부서로 등록하면 항상 admin 이 된다.
+- 최고관리자 고정 계정(admin·hongjh, users.pinned): 역할 변경·수동 잠금·비밀번호 초기화·삭제를 이 화면에서 할 수 없다(앱 검사 + DB 트리거).
+  다른 계정(보안관제팀 포함)은 일반 규칙대로 바꿀 수 있다(사용자 결정 2026-10-20).
+- 사용자 삭제는 최고관리자만 한다(permissions 의 users.delete). 결재·업무·게시글·대화 같은 기록이 그 사용자를 가리키므로 행을 지우지 않고
+  deleted_at 으로 표시한다: 로그인 불가(없는 계정과 같은 응답), 열린 세션·메신저 토큰 즉시 무효, 사용자 목록·결재선·담당자·참석자·조직도에서 빠짐.
+  아이디는 새 계정에 다시 쓸 수 없다(기록과 혼동 방지). 본인·고정 계정·이미 삭제된 계정은 삭제할 수 없고, 아이디를 다시 입력해야 실행된다.
+- 복구(재입사)도 최고관리자만 한다: 삭제 표시를 지우고 역할·직급을 다시 고르며, 새 임시 비밀번호를 한 번만 보여 준다.
+  예전 비밀번호·세션·메신저 토큰은 계속 무효다. 인사카드와 지난 기록은 같은 계정이라 그대로 다시 연결된다.
 - 직급(사원·대리·과장·팀장·관리자)은 역할 안의 세부 단계이고 사용자 관리에서 바꾼다(인사발령). 역할이 바뀌면 직급도 그 역할에 맞게 함께 바뀐다.
 - 보안 대시보드(감사 로그)와 CSV 내보내기는 보안관제팀 소속과 시스템관리자만 쓴다(permissions.py 의 security.dashboard). 일반 관리자는 열 수 없다."""
 import csv
@@ -22,7 +28,8 @@ from . import audit, db, validators
 from .approvals import conflict, forbidden
 from .auth import hash_password
 from .hr import today_kst
-from .permissions import ALLOWED_TITLES, DEFAULT_TITLE, RANKS, SECURITY_TEAM, can, matrix, permission_required
+from .permissions import (ALLOWED_TITLES, DEFAULT_TITLE, FINANCE_TEAMS, HR_TEAMS, PINNED_USERS, RANKS, SECURITY_TEAM, can, matrix,
+                          permission_required)
 from .security import log_event
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
@@ -45,8 +52,14 @@ def users():
     rows = db.query_all(
         "SELECT u.id, u.username, u.display_name, u.dept, u.role, u.pinned, u.failed_count, u.created_at, e.title, "
         "(u.locked_until IS NOT NULL AND u.locked_until > NOW()) AS is_locked "
-        "FROM users u LEFT JOIN employees e ON e.user_id = u.id ORDER BY u.pinned DESC, u.dept, u.role, u.username LIMIT 500")
-    return render_template("admin_users.html", rows=rows, roles=ROLES, titles=ALLOWED_TITLES)
+        "FROM users u LEFT JOIN employees e ON e.user_id = u.id WHERE u.deleted_at IS NULL "
+        "ORDER BY u.pinned DESC, u.dept, u.role, u.username LIMIT 500")
+    deleted = db.query_all(
+        "SELECT u.id, u.username, u.display_name, u.dept, u.deleted_at, d.username AS deleted_by FROM users u "
+        "LEFT JOIN users d ON d.id = u.deleted_by WHERE u.deleted_at IS NOT NULL ORDER BY u.deleted_at DESC LIMIT 200")
+    return render_template("admin_users.html", rows=rows, roles=ROLES, titles=ALLOWED_TITLES, deleted=deleted,
+                           can_delete=can(g.user, "users.delete"), depts=dept_options(), new_dept=NEW_DEPT,
+                           me_pinned=bool(g.user.get("pinned")))
 
 
 @bp.post("/users/<int:user_id>/role")
@@ -59,7 +72,7 @@ def change_role(user_id):
     if user_id == g.user["id"]:
         log_event("admin_action", "DENY", "self_change", action="role_change", target=g.user["username"])
         return forbidden("self_role_change", resource=f"user:{user_id}")
-    target = db.query_one("SELECT id, username, role, pinned FROM users WHERE id = %s FOR UPDATE", (user_id,))
+    target = db.query_one("SELECT id, username, role, pinned FROM users WHERE id = %s AND deleted_at IS NULL FOR UPDATE", (user_id,))
     if not target:
         abort(404)
     if target["pinned"]:
@@ -85,6 +98,38 @@ def _sync_title(user_id, role):
         db.execute_rowcount("UPDATE employees SET title = %s WHERE user_id = %s", (DEFAULT_TITLE[role], user_id))
 
 
+@bp.post("/users/<int:user_id>/dept")
+def change_dept(user_id):
+    """부서 변경(인사발령). 계정과 인사카드의 부서를 함께 바꾼다. 부서는 팀 권한·팀 일정·보안관제팀 권한을 정하므로
+    본인 부서는 바꿀 수 없고, 고정 계정(admin·hongjh)의 부서는 최고관리자만 바꾼다. 화면을 연 사이 바뀌었으면 덮어쓰지 않는다."""
+    raw = request.form.get("new_dept", "") if request.form.get("dept") == NEW_DEPT else request.form.get("dept", "")
+    expected = request.form.get("current_dept", "")
+    try:
+        new_dept = validators.text(raw, "dept", 1, 64)
+    except ValueError as exc:
+        log_event("input_rejected", "DENY", str(exc), field="dept_change")
+        return conflict("부서는 1~64자로 고르거나 입력하세요(새 부서는 이름을 입력).")
+    if user_id == g.user["id"]:
+        log_event("admin_action", "DENY", "self_change", action="dept_change", target=g.user["username"])
+        return forbidden("self_dept_change", resource=f"user:{user_id}")
+    target = db.query_one("SELECT id, username, dept, pinned FROM users WHERE id = %s AND deleted_at IS NULL FOR UPDATE", (user_id,))
+    if not target:
+        abort(404)
+    if target["pinned"] and not g.user.get("pinned"):
+        log_event("admin_action", "DENY", "pinned_account", action="dept_change", target=target["username"])
+        return forbidden("pinned_account", resource=f"user:{user_id}")
+    if target["dept"] != expected:
+        log_event("admin_action", "DENY", "stale_form", action="dept_change", target=target["username"])
+        return conflict("다른 곳에서 이미 변경된 사용자입니다. 목록을 새로 고친 뒤 다시 시도하세요.")
+    if target["dept"] == new_dept:
+        return redirect(url_for("admin.users"), 303)
+    if db.execute_rowcount("UPDATE users SET dept = %s WHERE id = %s AND dept = %s", (new_dept, user_id, expected)) != 1:
+        return conflict("다른 곳에서 이미 변경된 사용자입니다. 목록을 새로 고친 뒤 다시 시도하세요.")
+    db.execute_rowcount("UPDATE employees SET dept = %s WHERE user_id = %s", (new_dept, user_id))
+    log_event("admin_action", "ALLOW", "dept_change", action="dept_change", target=target["username"], old=expected, new=new_dept)
+    return redirect(url_for("admin.users"), 303)
+
+
 @bp.post("/users/<int:user_id>/title")
 def change_title(user_id):
     """직급(인사발령) 변경. 직급은 역할 안의 세부 단계라서 그 역할이 허용하는 직급만 고를 수 있다."""
@@ -93,7 +138,7 @@ def change_title(user_id):
         return forbidden("self_title_change", resource=f"user:{user_id}")
     new_title = request.form.get("title", "")
     target = db.query_one("SELECT u.id, u.username, u.role, e.id AS emp_id, e.title FROM users u "
-                          "LEFT JOIN employees e ON e.user_id = u.id WHERE u.id = %s FOR UPDATE", (user_id,))
+                          "LEFT JOIN employees e ON e.user_id = u.id WHERE u.id = %s AND u.deleted_at IS NULL FOR UPDATE", (user_id,))
     if not target:
         abort(404)
     if not target["emp_id"]:
@@ -113,7 +158,7 @@ def change_title(user_id):
 @bp.post("/users/<int:user_id>/unlock")
 def unlock(user_id):
     target = db.query_one("SELECT id, username, failed_count, (locked_until IS NOT NULL AND locked_until > NOW()) AS is_locked "
-                          "FROM users WHERE id = %s FOR UPDATE", (user_id,))
+                          "FROM users WHERE id = %s AND deleted_at IS NULL FOR UPDATE", (user_id,))
     if not target:
         abort(404)
     db.execute_rowcount("UPDATE users SET failed_count = 0, locked_until = NULL WHERE id = %s", (user_id,))
@@ -137,33 +182,43 @@ def make_temp_password(username: str) -> str:
             continue
 
 
-def _credentials(user, password, created):
-    return render_template("admin_credentials.html", target=user, password=password, created=created)
+def _credentials(user, password, created, restored=False):
+    return render_template("admin_credentials.html", target=user, password=password, created=created, restored=restored)
+
+
+NEW_DEPT = "__new__"   # 부서 목록의 "새 부서 직접 입력" 값
+
+
+def dept_options():
+    """사용자 등록 화면의 부서 목록: 권한 규칙이 이름으로 보는 부서 + 지금 계정(삭제된 계정 제외)·인사카드에 있는 부서."""
+    rows = db.query_all("SELECT dept FROM users WHERE deleted_at IS NULL UNION SELECT dept FROM employees")
+    return sorted({SECURITY_TEAM, *FINANCE_TEAMS, *HR_TEAMS} | {r["dept"] for r in rows if r["dept"]})
 
 
 def _new_form(error=None, status=200, values=None):
     return render_template("admin_user_new.html", roles=ROLES, titles=TITLES, ranks=RANKS, security_team=SECURITY_TEAM, error=error,
-                           values=values or {}), status
+                           values=values or {}, depts=dept_options(), new_dept=NEW_DEPT), status
 
 
 @bp.route("/users/new", methods=["GET", "POST"])
 def user_new():
     if request.method == "GET":
         return _new_form()
-    values = {k: request.form.get(k, "") for k in ("username", "display_name", "dept", "role", "title")}
+    values = {k: request.form.get(k, "") for k in ("username", "display_name", "dept", "new_dept", "role", "title")}
     try:
         username = validators.username(values["username"])
         display_name = validators.text(values["display_name"], "display_name", 1, 64)
-        dept = validators.text(values["dept"], "dept", 1, 64)
+        # 목록에서 고르거나, "새 부서 직접 입력"을 고르면 새 부서 이름 칸의 값을 쓴다.
+        dept = validators.text(values["new_dept"] if values["dept"] == NEW_DEPT else values["dept"], "dept", 1, 64)
         if values["role"] not in ROLES:
             raise ValueError("role")
-        role = "admin" if dept == SECURITY_TEAM else values["role"]       # 보안관제팀은 항상 최상위 권한(DB 트리거도 같은 규칙)
+        role = values["role"]
         title = values["title"] or DEFAULT_TITLE[role]
         if title not in ALLOWED_TITLES[role]:
             raise ValueError("title")
     except ValueError as exc:
         log_event("input_rejected", "DENY", str(exc), field="user_create")
-        return _new_form("아이디는 영문 소문자로 시작하는 3~32자(소문자·숫자·밑줄), 이름·부서는 1~64자, 역할·직급은 목록에서 선택하세요"
+        return _new_form("아이디는 영문 소문자로 시작하는 3~32자(소문자·숫자·밑줄), 이름·부서는 1~64자(새 부서는 이름을 입력), 역할·직급은 목록에서 선택하세요"
                          "(직급은 역할에 맞아야 합니다: 직원=사원·대리·과장, 팀장=팀장, 관리자=관리자).", 400, values)
     if db.query_one("SELECT id FROM users WHERE username = %s", (username,)):
         log_event("admin_action", "DENY", "duplicate_username", action="user_create", target=username)
@@ -178,8 +233,7 @@ def user_new():
     except pymysql.err.IntegrityError:
         log_event("admin_action", "DENY", "duplicate_username", action="user_create", target=username)
         return _new_form("이미 있는 아이디입니다.", 409, values)
-    log_event("admin_action", "ALLOW", "user_create", action="user_create", target=username, role=role, title=title,
-              pinned=role == "admin" and dept == SECURITY_TEAM)
+    log_event("admin_action", "ALLOW", "user_create", action="user_create", target=username, role=role, title=title)
     return _credentials({"username": username, "display_name": display_name}, password, created=True)
 
 
@@ -188,7 +242,7 @@ def reset_password(user_id):
     if user_id == g.user["id"]:
         log_event("admin_action", "DENY", "self_change", action="password_reset", target=g.user["username"])
         return forbidden("self_password_reset", resource=f"user:{user_id}")
-    target = db.query_one("SELECT id, username, display_name, pinned FROM users WHERE id = %s FOR UPDATE", (user_id,))
+    target = db.query_one("SELECT id, username, display_name, pinned FROM users WHERE id = %s AND deleted_at IS NULL FOR UPDATE", (user_id,))
     if not target:
         abort(404)
     if target["pinned"]:                         # 고정 계정의 비밀번호는 본인만 바꾼다(비밀번호 변경 화면)
@@ -207,7 +261,7 @@ def lock(user_id):
     if user_id == g.user["id"]:
         log_event("admin_action", "DENY", "self_change", action="lock", target=g.user["username"])
         return forbidden("self_lock", resource=f"user:{user_id}")
-    target = db.query_one("SELECT id, username, pinned FROM users WHERE id = %s FOR UPDATE", (user_id,))
+    target = db.query_one("SELECT id, username, pinned FROM users WHERE id = %s AND deleted_at IS NULL FOR UPDATE", (user_id,))
     if not target:
         abort(404)
     if target["pinned"]:                         # 고정 계정은 다른 관리자가 잠글 수 없다(보안관제·시스템 관리 기능이 멈추는 것을 막는다)
@@ -220,14 +274,104 @@ def lock(user_id):
     return redirect(url_for("admin.users"), 303)
 
 
+# ---------- 사용자 삭제(최고관리자만) ----------
+def _delete_target(user_id):
+    """(대상, 오류 응답). 본인·없는 계정·이미 삭제·고정 계정은 삭제할 수 없다."""
+    if user_id == g.user["id"]:
+        log_event("admin_action", "DENY", "self_change", action="user_delete", target=g.user["username"])
+        return None, forbidden("self_delete", resource=f"user:{user_id}")
+    target = db.query_one("SELECT id, username, display_name, dept, role, pinned FROM users WHERE id = %s AND deleted_at IS NULL FOR UPDATE",
+                          (user_id,))
+    if not target:
+        abort(404)
+    if target["pinned"]:
+        log_event("admin_action", "DENY", "pinned_account", action="user_delete", target=target["username"])
+        return None, forbidden("pinned_account", resource=f"user:{user_id}")
+    return target, None
+
+
+@bp.get("/users/<int:user_id>/delete")
+@permission_required("users.delete")
+def delete_confirm(user_id):
+    target, err = _delete_target(user_id)
+    if err:
+        return err
+    return render_template("admin_user_delete.html", target=target, error=None)
+
+
+@bp.post("/users/<int:user_id>/delete")
+@permission_required("users.delete")
+def delete_user(user_id):
+    target, err = _delete_target(user_id)
+    if err:
+        return err
+    if request.form.get("confirm_username", "").strip() != target["username"]:      # 실수로 지우지 않게 아이디를 다시 입력받는다
+        log_event("admin_action", "DENY", "confirm_mismatch", action="user_delete", target=target["username"])
+        return render_template("admin_user_delete.html", target=target, error="아이디가 일치하지 않습니다. 삭제할 계정의 아이디를 정확히 입력하세요."), 400
+    n = db.execute_rowcount("UPDATE users SET deleted_at = NOW(), deleted_by = %s, session_version = session_version + 1 "
+                            "WHERE id = %s AND deleted_at IS NULL AND pinned = 0", (g.user["id"], user_id))
+    if n != 1:
+        return conflict("이미 삭제되었거나 삭제할 수 없는 계정입니다.")
+    revoked = db.execute_rowcount("UPDATE api_tokens SET revoked_at = NOW() WHERE user_id = %s AND revoked_at IS NULL", (user_id,))
+    log_event("admin_action", "ALLOW", "user_delete", action="user_delete", target=target["username"], role=target["role"],
+              tokens_revoked=revoked)
+    return redirect(url_for("admin.users"), 303)
+
+
+# ---------- 삭제한 계정 복구(재입사, 최고관리자만) ----------
+def _restore_form(target, error=None, status=200, values=None):
+    return render_template("admin_user_restore.html", target=target, roles=ROLES, ranks=RANKS, titles=TITLES, error=error,
+                           values=values or {}), status
+
+
+def _restore_target(user_id):
+    target = db.query_one("SELECT u.id, u.username, u.display_name, u.dept, u.role, u.deleted_at, e.title FROM users u "
+                          "LEFT JOIN employees e ON e.user_id = u.id WHERE u.id = %s AND u.deleted_at IS NOT NULL FOR UPDATE", (user_id,))
+    if not target:
+        abort(404)                               # 삭제되지 않은 계정·없는 계정
+    return target
+
+
+@bp.get("/users/<int:user_id>/restore")
+@permission_required("users.delete")
+def restore_confirm(user_id):
+    return _restore_form(_restore_target(user_id))
+
+
+@bp.post("/users/<int:user_id>/restore")
+@permission_required("users.delete")
+def restore_user(user_id):
+    target = _restore_target(user_id)
+    values = {k: request.form.get(k, "") for k in ("role", "title", "confirm_username")}
+    if values["confirm_username"].strip() != target["username"]:
+        log_event("admin_action", "DENY", "confirm_mismatch", action="user_restore", target=target["username"])
+        return _restore_form(target, "아이디가 일치하지 않습니다. 복구할 계정의 아이디를 정확히 입력하세요.", 400, values)
+    role = values["role"]
+    title = values["title"] or DEFAULT_TITLE.get(role, "")
+    if role not in ROLES or title not in ALLOWED_TITLES[role]:
+        log_event("input_rejected", "DENY", "role_or_title", field="user_restore")
+        return _restore_form(target, "역할과 직급을 목록에서 고르세요(직원=사원·대리·과장, 팀장=팀장, 관리자=관리자).", 400, values)
+    password = make_temp_password(target["username"])
+    # 예전 비밀번호·세션은 쓰지 못하게 새 임시 비밀번호로 바꾸고 세션 버전을 올린다. 메신저 토큰은 삭제 때 폐기된 그대로 둔다.
+    n = db.execute_rowcount("UPDATE users SET deleted_at = NULL, deleted_by = NULL, role = %s, password_hash = %s, failed_count = 0, "
+                            "locked_until = NULL, session_version = session_version + 1 WHERE id = %s AND deleted_at IS NOT NULL",
+                            (role, hash_password(password), user_id))
+    if n != 1:
+        return conflict("이미 복구된 계정입니다.")
+    if target["title"] is not None and target["title"] != title:
+        db.execute_rowcount("UPDATE employees SET title = %s WHERE user_id = %s", (title, user_id))
+    log_event("admin_action", "ALLOW", "user_restore", action="user_restore", target=target["username"], role=role, title=title)
+    return _credentials(target, password, created=False, restored=True)
+
+
 # ---------- 관리 현황 ----------
 @bp.get("/overview")
 def overview():
-    roles = {r["role"]: r["n"] for r in db.query_all("SELECT role, COUNT(*) AS n FROM users GROUP BY role")}
-    depts = db.query_all("SELECT dept, COUNT(*) AS n FROM users GROUP BY dept ORDER BY dept")
+    roles = {r["role"]: r["n"] for r in db.query_all("SELECT role, COUNT(*) AS n FROM users WHERE deleted_at IS NULL GROUP BY role")}
+    depts = db.query_all("SELECT dept, COUNT(*) AS n FROM users WHERE deleted_at IS NULL GROUP BY dept ORDER BY dept")
     stats = {
         "users": sum(roles.values()),
-        "locked": db.query_one("SELECT COUNT(*) AS n FROM users WHERE locked_until IS NOT NULL AND locked_until > NOW()")["n"],
+        "locked": db.query_one("SELECT COUNT(*) AS n FROM users WHERE deleted_at IS NULL AND locked_until IS NOT NULL AND locked_until > NOW()")["n"],
         "approvals": db.query_one("SELECT COUNT(*) AS n FROM approvals WHERE status = 'pending'")["n"],
         "leaves": db.query_one("SELECT COUNT(*) AS n FROM leave_requests WHERE status = 'pending'")["n"],
         "attendance": db.query_one("SELECT COUNT(*) AS n FROM attendance WHERE work_date = %s", (today_kst(),))["n"],
@@ -363,9 +507,10 @@ PERMISSIONS = [
 
 @bp.get("/permissions")
 def permissions():
-    counts = {r["role"]: r["n"] for r in db.query_all("SELECT role, COUNT(*) AS n FROM users GROUP BY role")}
+    counts = {r["role"]: r["n"] for r in db.query_all("SELECT role, COUNT(*) AS n FROM users WHERE deleted_at IS NULL GROUP BY role")}
     ranks = {r["title"]: r["n"] for r in db.query_all(
-        "SELECT COALESCE(e.title, '(인사카드 없음)') AS title, COUNT(*) AS n FROM users u LEFT JOIN employees e ON e.user_id = u.id GROUP BY title")}
+        "SELECT COALESCE(e.title, '(인사카드 없음)') AS title, COUNT(*) AS n FROM users u LEFT JOIN employees e ON e.user_id = u.id "
+        "WHERE u.deleted_at IS NULL GROUP BY title")}
     pinned = db.query_all("SELECT username, display_name, dept FROM users WHERE pinned = 1 ORDER BY dept, username LIMIT 100")
     return render_template("admin_permissions.html", rows=PERMISSIONS, counts=counts, ranks=RANKS, rank_counts=ranks,
                            rank_matrix=matrix(), pinned=pinned, security_team=SECURITY_TEAM)

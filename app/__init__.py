@@ -1,7 +1,7 @@
 from flask import Flask, g, jsonify, render_template, request
 from werkzeug.exceptions import HTTPException
 
-from . import admin, approvals, auth, chat, db, erp, formats, hr, library, messenger_api, permissions, portal, profile, realtime, security, work
+from . import admin, ai, approvals, auth, chat, db, erp, formats, hr, internal_api, library, messenger_api, permissions, portal, profile, realtime, security, work
 from .config import Config
 
 ERROR_TEXT = {
@@ -43,8 +43,17 @@ def create_app(overrides=None):
     app.register_blueprint(work.bp)
     app.register_blueprint(library.bp)
     app.register_blueprint(messenger_api.bp)  # 메신저(nexus-messenger) 토큰 인증 JSON API, /api/v1/*
+    app.register_blueprint(internal_api.bp)  # 실습용 내부 API(토큰 검사, 호출 로그 via=direct), /internal/api/v1/*
     realtime.init_app(app)  # 메신저 실시간 전송(Socket.IO)
-    app.config.setdefault("CHAT_RESPONDER", chat.placeholder_responder)  # 실제 AI 연결은 다른 담당이 이 값을 교체한다
+    default_responder = (
+        chat.placeholder_responder
+        if app.config.get("TESTING") and not (overrides and "AI_PROVIDER" in overrides)
+        else ai.select_responder(app.config)
+    )
+    app.config.setdefault("CHAT_RESPONDER", default_responder)
+    if not app.config.get("TESTING"):
+        from nexus_team_integration import init_app as init_team_integration
+        init_team_integration(app)
     app.jinja_env.filters["won"] = lambda n: f"{int(n):,}원"
     app.jinja_env.filters["hangul_won"] = formats.won_hangul
     app.jinja_env.filters["status_label"] = lambda s: STATUS_LABEL.get(s, s)

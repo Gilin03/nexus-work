@@ -115,8 +115,9 @@ def card_detail(emp_id):
 @bp.get("/org")
 @login_required
 def org_chart():
-    rows = db.query_all("SELECT name, dept, title, ext FROM employees "
-                        "ORDER BY dept, FIELD(title, '관리자', '팀장', '과장', '대리', '사원'), name")
+    rows = db.query_all("SELECT e.name, e.dept, e.title, e.ext FROM employees e LEFT JOIN users u ON u.id = e.user_id "
+                        "WHERE u.deleted_at IS NULL "                       # 삭제된 계정의 직원은 조직도에서 뺀다(인사카드 기록은 남는다)
+                        "ORDER BY e.dept, FIELD(title, '관리자', '팀장', '과장', '대리', '사원'), name")
     depts = {}
     for r in rows:
         depts.setdefault(r["dept"], []).append(r)
@@ -168,7 +169,7 @@ def check_in():
         log_event("hr_attendance_conflict", "DENY", "already_checked_in")
         return conflict("오늘은 이미 출근 처리되었습니다.")
     log_event("hr_check_in", "INFO", "ok", late=now.time() > time(9, 0, 59))
-    return redirect(url_for("hr.attendance"), 303)
+    return redirect(_after_attendance(), 303)
 
 
 @bp.post("/attendance/check-out")
@@ -181,7 +182,12 @@ def check_out():
         log_event("hr_attendance_conflict", "DENY", "no_open_check_in")
         return conflict("오늘 출근 기록이 없거나 이미 퇴근 처리되었습니다.")
     log_event("hr_check_out", "INFO", "ok")
-    return redirect(url_for("hr.attendance"), 303)
+    return redirect(_after_attendance(), 303)
+
+
+def _after_attendance():
+    """출퇴근 뒤 돌아갈 곳: 홈에서 눌렀으면 홈, 아니면 근태 화면(다른 값은 무시해 열린 이동을 막는다)."""
+    return url_for("auth.home") if request.form.get("next") == "home" else url_for("hr.attendance")
 
 
 # ---------- 휴가 ----------

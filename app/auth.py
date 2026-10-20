@@ -56,7 +56,7 @@ def load_user():
         "SELECT id, username, role, display_name, dept, session_version, pinned, "
         "(SELECT e.title FROM employees e WHERE e.user_id = users.id) AS title, "
         "(locked_until IS NOT NULL AND locked_until > NOW()) AS is_locked, "
-        "EXISTS(SELECT 1 FROM profile_photos p WHERE p.user_id = users.id) AS has_photo FROM users WHERE id = %s", (uid,))
+        "EXISTS(SELECT 1 FROM profile_photos p WHERE p.user_id = users.id) AS has_photo FROM users WHERE id = %s AND deleted_at IS NULL", (uid,))
     if not row or row["is_locked"] or session.get("sv") != row["session_version"]:
         # 삭제됐거나 잠긴 계정, 로그아웃·비밀번호 변경으로 무효가 된 쿠키는 즉시 세션 무효화
         session.clear()
@@ -133,7 +133,7 @@ def authenticate(raw_name: str, password: str):
         row = db.query_one(
             "SELECT id, username, password_hash, role, display_name, dept, session_version, "
             "(locked_until IS NOT NULL AND locked_until > NOW()) AS is_locked "
-            "FROM users WHERE username = %s FOR UPDATE", (name,))
+            "FROM users WHERE username = %s AND deleted_at IS NULL FOR UPDATE", (name,))   # 삭제된 계정은 없는 계정과 똑같이 처리
 
     password_ok = verify_password(row["password_hash"] if row else _DUMMY_HASH, password)
 
@@ -164,8 +164,8 @@ def authenticate(raw_name: str, password: str):
 @bp.get("/")
 @login_required
 def home():
-    # 임시 홈: 이후 단계에서 포털 화면으로 대체된다.
-    return render_template("home.html")
+    from . import dashboard                      # 홈 대시보드(본인 범위 요약). 순환 import 를 피하려고 여기서 불러온다
+    return render_template("home.html", d=dashboard.build(g.user))
 
 
 @bp.route("/login", methods=["GET", "POST"])

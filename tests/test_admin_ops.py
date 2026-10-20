@@ -63,6 +63,29 @@ def test_invalid_user_input_is_rejected_without_creating_anything(aapp, root, kw
     assert r.status_code == 400 and sql(root, "SELECT COUNT(*) FROM users")[0][0] == before
 
 
+def test_new_user_form_lists_departments(aapp, root):
+    html = as_user(aapp, "zz_adm").get("/admin/users/new").get_data(as_text=True)
+    box = html.split('<select name="dept"')[1].split("</select>")[0]
+    for dept in ("A팀", "B팀", "보안관제팀", "경영지원팀", "인사팀", "재무팀"):       # 시험 계정의 부서 + 권한 규칙이 보는 부서
+        assert f'<option value="{dept}">{dept}</option>' in box
+    assert 'value="__new__"' in box and 'name="new_dept"' in html and "dept-select.js" in html
+
+
+def test_pick_department_from_list_or_type_a_new_one(aapp, root):
+    adm = as_user(aapp, "zz_adm")
+    assert create(adm, username="zz_d1", dept="A팀", new_dept="무시됨").status_code == 200
+    assert create(adm, username="zz_d2", dept="__new__", new_dept=" zz_신설팀 ").status_code == 200
+    rows = dict(sql(root, "SELECT username, dept FROM users WHERE username IN ('zz_d1','zz_d2')"))
+    assert rows == {"zz_d1": "A팀", "zz_d2": "zz_신설팀"}
+    assert sql(root, "SELECT dept FROM employees WHERE user_id=%s", (uid(root, "zz_d2"),))[0][0] == "zz_신설팀"
+    html = adm.get("/admin/users/new").get_data(as_text=True)
+    assert '<option value="zz_신설팀">zz_신설팀</option>' in html                       # 새 부서는 다음부터 목록에 나온다
+    for bad in ("", "가" * 65, "줄\x00바꿈"):
+        r = create(adm, username="zz_d3", dept="__new__", new_dept=bad)
+        assert r.status_code == 400 and 'value="__new__" selected' in r.get_data(as_text=True)
+    assert not sql(root, "SELECT id FROM users WHERE username='zz_d3'")
+
+
 def test_duplicate_username_is_a_conflict_and_does_not_change_the_existing_user(aapp, root):
     before = sql(root, "SELECT role, display_name, password_hash FROM users WHERE username='zz_emp'")
     r = create(as_user(aapp, "zz_adm"), username="zz_emp", name="탈취", role="admin")
@@ -218,3 +241,50 @@ def test_admin_menu_group_has_four_items_for_admins_only(aapp):
     for who in ("zz_emp", "zz_mgr"):
         html = as_user(aapp, who).get("/").get_data(as_text=True)
         assert "<h2>관리</h2>" not in html and "보안 대시보드" not in html and "권한 현황" not in html
+
+
+# ---------- 부서 변경 ----------
+def change_dept(client, target, current, dept, new_dept=""):
+    return post(client, f"/admin/users/{target}/dept", current_dept=current, dept=dept, new_dept=new_dept)
+
+
+def test_admin_moves_a_user_to_another_department(aapp, root, events):
+    emp = uid(root, "zz_emp")
+    sql(root, "INSERT INTO employees(user_id,name,dept,title,ext) VALUES(%s,'zz_emp','A팀','사원','-')", (emp,))
+    adm = as_user(aapp, "zz_adm")
+    assert change_dept(adm, emp, "A팀", "B팀").status_code == 303
+    assert sql(root, "SELECT dept FROM users WHERE id=%s", (emp,))[0][0] == "B팀"
+    assert sql(root, "SELECT dept FROM employees WHERE user_id=%s", (emp,))[0][0] == "B팀"        # 인사카드도 같이
+    assert any(e.get("reason") == "dept_change" and e.get("old") == "A팀" and e.get("new") == "B팀" for e in events())
+    assert change_dept(adm, emp, "B팀", "__new__", "zz_신설팀").status_code == 303               # 목록에 없는 새 부서
+    assert sql(root, "SELECT dept FROM users WHERE id=%s", (emp,))[0][0] == "zz_신설팀"
+    html = adm.get("/admin/users").get_data(as_text=True)
+    assert f'action="/admin/users/{emp}/dept"' in html and 'data-new-dept=' in html and "dept-select.js" in html
+
+
+def test_department_change_applies_to_team_scope_at_once(aapp, root):
+    emp, other = uid(root, "zz_emp"), uid(root, "zz_emp3")                                      # zz_emp3 는 B팀
+    sql(root, "INSERT INTO events(owner_id,title,start_at,end_at,scope) VALUES(%s,'zz_B팀 회의',NOW(),DATE_ADD(NOW(), INTERVAL 1 HOUR),'team')", (other,))
+    c = as_user(aapp, "zz_emp")                                                                 # 이미 로그인해 있던 세션
+    assert "zz_B팀 회의" not in c.get("/").get_data(as_text=True)
+    assert change_dept(as_user(aapp, "zz_adm"), emp, "A팀", "B팀").status_code == 303
+    assert "zz_B팀 회의" in c.get("/").get_data(as_text=True)                                     # 다시 로그인하지 않아도 새 부서 기준
+
+
+def test_department_change_guards(aapp, root, pinned_dept):
+    adm, emp, me = as_user(aapp, "zz_adm"), uid(root, "zz_emp"), uid(root, "zz_adm")
+    assert change_dept(adm, me, "관리팀", "보안관제팀").status_code == 403                          # 본인 부서는 못 바꾼다(권한 올리기 방지)
+    assert change_dept(adm, pinned_dept, "보안관제팀", "A팀").status_code == 403                   # 고정 계정은 최고관리자만
+    assert change_dept(adm, emp, "B팀", "C팀").status_code == 409                                 # 화면을 연 사이 바뀜
+    for bad in ("", "가" * 65):
+        assert change_dept(adm, emp, "A팀", "__new__", bad).status_code == 409
+    assert change_dept(as_user(aapp, "zz_mgr"), emp, "A팀", "B팀").status_code == 403             # 관리자가 아니면 못 한다
+    assert aapp.test_client().post(f"/admin/users/{emp}/dept", data={"dept": "B팀", "current_dept": "A팀"}).status_code in (302, 303, 403)
+    assert sql(root, "SELECT dept FROM users WHERE username IN ('zz_emp','zz_adm','zz_sec') ORDER BY username") == (("관리팀",), ("A팀",), ("보안관제팀",))
+    assert change_dept(as_user(aapp, "zz_sec"), uid(root, "zz_adm"), "관리팀", "보안관제팀").status_code == 303   # 최고관리자는 가능
+
+
+@pytest.fixture()
+def pinned_dept(root):
+    sql(root, "UPDATE users SET pinned=1 WHERE username='zz_sec'")
+    return uid(root, "zz_sec")

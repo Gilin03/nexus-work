@@ -4,8 +4,8 @@
 <h1>권한 현황</h1>
 
 <div class="sheet">
-  <h2>최상위 권한 고정 계정</h2>
-  <p class="hint">{{ security_team }} 소속 계정과 시스템관리자(admin)는 항상 관리자 역할입니다. 만들 때 자동으로 정해지고, 이후 역할을 낮추거나 풀 수 없으며(앱 검사 + DB 트리거), 다른 관리자가 이 계정을 잠그거나 비밀번호를 초기화할 수도 없습니다. 고정 계정만 보안 대시보드를 열 수 있습니다.</p>
+  <h2>최고관리자 고정 계정</h2>
+  <p class="hint">admin(시스템관리자)·hongjh 두 계정만 최고관리자로 고정됩니다. 항상 관리자 역할이고 역할을 낮추거나 풀 수 없으며(앱 검사 + DB 트리거), 다른 관리자가 잠그거나 비밀번호를 초기화하거나 삭제할 수도 없습니다. 사용자 삭제는 이 두 계정만 할 수 있습니다. {{ security_team }}의 다른 계정은 일반 관리자처럼 역할을 바꿀 수 있고, 관리자 역할인 동안 보안 대시보드를 엽니다.</p>
   {% if pinned %}
   <ul class="plain">{% for u in pinned %}<li>{{ u.username }} <span class="hint">{{ u.display_name }} · {{ u.dept }}</span></li>{% endfor %}</ul>
   {% else %}<p class="hint">고정 계정이 없습니다.</p>{% endif %}
@@ -43,7 +43,7 @@
     <table>
       <thead><tr><th>팀</th><th>추가로 가지는 권한</th></tr></thead>
       <tbody>
-        <tr><th scope="row">{{ security_team }}</th><td>보안 대시보드·감사 로그·CSV 내보내기(전 구성원이 관리자 역할로 고정)</td></tr>
+        <tr><th scope="row">{{ security_team }} (관리자 역할)</th><td>보안 대시보드·감사 로그·CSV 내보내기</td></tr>
         <tr><th scope="row">경영지원팀·재무팀 (과장 이상)</th><td>재무 보고 열람, 전사 급여 조회</td></tr>
         <tr><th scope="row">경영지원팀·인사팀 (과장 이상)</th><td>전사 인사카드 조회</td></tr>
         <tr><th scope="row">영업팀·개발팀·그 밖의 팀</th><td>팀 전용 권한 없음(직급·역할 권한만 적용)</td></tr>

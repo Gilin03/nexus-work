@@ -7,12 +7,15 @@
 - 대화방 접근은 매 요청 conversation_members 로 재확인한다(세션 로그인과 같은 원칙:
   멤버 목록을 캐시하거나 토큰 안에 담지 않는다).
 """
+import json
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from flask import Blueprint, current_app, g, jsonify, request
 
-from . import auth, db, validators
+from . import auth, db, uploads, validators
 from .realtime import broadcast_message, join_new_conversation
 from .security import ip_rate_limited, log_event
 
@@ -21,6 +24,10 @@ bp = Blueprint("messenger_api", __name__, url_prefix="/api/v1")
 TOKEN_TTL_DAYS = 30
 MAX_MESSAGE = 4000
 MAX_GROUP_MEMBERS = 50
+PHOTO_MAX_BYTES = 10 * 1024 * 1024   # 메신저에서 올리는 프로필 사진 상한
+UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+FILE_PREFIX = "[FILE|"
+FILE_MSG_RE = re.compile(r"^\[FILE\|([0-9a-f-]{36})\|(\d+)\|([^|\]]+)\|([^|\]]+)\]")
 
 
 def _err(code, message, status):
@@ -40,7 +47,7 @@ def _load_token_user():
         "SELECT t.id AS token_id, u.id, u.username, u.role, u.display_name, u.dept, "
         "(u.locked_until IS NOT NULL AND u.locked_until > NOW()) AS is_locked "
         "FROM api_tokens t JOIN users u ON u.id = t.user_id "
-        "WHERE t.token_hash = %s AND t.revoked_at IS NULL AND t.expires_at > NOW()", (token_hash,))
+        "WHERE t.token_hash = %s AND t.revoked_at IS NULL AND t.expires_at > NOW() AND u.deleted_at IS NULL", (token_hash,))
     if not row or row["is_locked"]:
         return None
     g.token_id = row["token_id"]
@@ -108,7 +115,7 @@ def api_logout():
 def list_users():
     q = request.args.get("q", "").strip()
     if not q:
-        rows = db.query_all("SELECT id, username, display_name, dept FROM users WHERE id <> %s "
+        rows = db.query_all("SELECT id, username, display_name, dept FROM users WHERE id <> %s AND deleted_at IS NULL "
                             "ORDER BY display_name LIMIT 50", (g.user["id"],))
         return jsonify(users=rows)
     try:
@@ -116,7 +123,7 @@ def list_users():
     except ValueError:
         return _err("invalid_query", "검색어는 1~50자로 입력하세요.", 400)
     rows = db.query_all("SELECT id, username, display_name, dept FROM users "
-                        "WHERE id <> %s AND (display_name LIKE %s OR username LIKE %s OR dept LIKE %s) "
+                        "WHERE id <> %s AND deleted_at IS NULL AND (display_name LIKE %s OR username LIKE %s OR dept LIKE %s) "
                         "ORDER BY display_name LIMIT 50", (g.user["id"], pattern, pattern, pattern))
     return jsonify(users=rows)
 
@@ -163,7 +170,7 @@ def create_conversation():
     # 가변 개수 id 조회는 이 프로젝트의 기존 관례(erp.py 의 팀 범위 조회)와 같이 FIND_IN_SET 을 쓴다
     # (IN (...) 을 동적으로 만들면 tests/test_sql_static.py 의 "SQL은 항상 상수 문자열" 규칙에 걸린다).
     ids_csv = ",".join(str(m) for m in member_ids)
-    existing = db.query_all("SELECT id FROM users WHERE FIND_IN_SET(id, %s)", (ids_csv,))
+    existing = db.query_all("SELECT id FROM users WHERE FIND_IN_SET(id, %s) AND deleted_at IS NULL", (ids_csv,))
     if len(existing) != len(member_ids):
         return _err("invalid_members", "존재하지 않는 사용자가 포함되어 있습니다.", 400)
 
@@ -223,6 +230,10 @@ def send_message(conversation_id):
         text = validators.text(str(body.get("body", "")), "message", 1, MAX_MESSAGE, multiline=True)
     except ValueError:
         return _err("invalid_body", f"메시지는 1~{MAX_MESSAGE}자로 입력하세요(제어문자 사용 불가).", 400)
+    if text.startswith(FILE_PREFIX):
+        # 파일 메시지는 send_file 만 만든다. 글 메시지로 흉내 내면 남의 업로드 파일 이름으로 다운로드 권한을 얻을 수 있다.
+        log_event("messenger_authz_deny", "DENY", "forged_file_message", resource=f"conversation:{conversation_id}")
+        return _err("invalid_body", "파일은 파일 전송으로 보내세요.", 400)
 
     msg_id = db.execute("INSERT INTO messenger_messages(conversation_id, sender_id, body) VALUES(%s, %s, %s)",
                         (conversation_id, g.user["id"], text))
@@ -234,3 +245,188 @@ def send_message(conversation_id):
     log_event("messenger_message_sent", "INFO", "ok", conversation_id=conversation_id, chars=len(text))
     broadcast_message(conversation_id, payload)
     return jsonify(message=payload), 201
+
+
+@bp.post("/conversations/<int:conversation_id>/files")
+@token_required
+def send_file(conversation_id):
+    if not _is_member(conversation_id, g.user["id"]):
+        log_event("messenger_authz_deny", "DENY", "not_member", resource=f"conversation:{conversation_id}")
+        return _err("forbidden", "접근 권한이 없습니다.", 403)
+    if ip_rate_limited(f"msg:{g.user['id']}", current_app.config.get("CHAT_USER_LIMIT", 20)):
+        log_event("rate_limited", "BLOCK", "messenger_user_limit")
+        return _err("rate_limited", "파일을 너무 빠르게 보내고 있습니다.", 429)
+    storage = request.files.get("file")
+    if not storage or not storage.filename:
+        return _err("invalid_file", "전송할 파일을 선택하세요.", 400)
+    caption_raw = (request.form.get("caption") or "").strip()
+    caption = ""
+    if caption_raw:
+        try:
+            caption = validators.text(caption_raw, "caption", 1, 1000, multiline=True)
+        except ValueError:
+            return _err("invalid_caption", "설명 메시지가 올바르지 않습니다.", 400)
+
+    upload_dir = Path(current_app.config["UPLOAD_DIR"])
+    meta = uploads.save_attachment(upload_dir, storage)
+    text = f"[FILE|{meta['stored_name']}|{meta['size']}|{meta['mime']}|{meta['orig_name']}]"
+    if caption:
+        text = f"{text}\n{caption}"
+    try:
+        msg_id = db.execute("INSERT INTO messenger_messages(conversation_id, sender_id, body) VALUES(%s, %s, %s)",
+                            (conversation_id, g.user["id"], text))
+        db.execute("UPDATE conversation_members SET last_read_message_id = %s WHERE conversation_id = %s AND user_id = %s",
+                  (msg_id, conversation_id, g.user["id"]))
+        row = db.query_one("SELECT created_at FROM messenger_messages WHERE id = %s", (msg_id,))
+    except BaseException:
+        uploads.remove_saved(upload_dir, [meta])
+        raise
+    payload = {"id": msg_id, "conversation_id": conversation_id, "sender_id": g.user["id"],
+              "sender_name": g.user["display_name"], "body": text, "created_at": row["created_at"].isoformat()}
+    log_event("messenger_file_sent", "INFO", "ok", conversation_id=conversation_id,
+              bytes=meta["size"], mime=meta["mime"])
+    broadcast_message(conversation_id, payload)
+    return jsonify(message=payload), 201
+
+
+@bp.get("/conversations/<int:conversation_id>/files/<stored_name>")
+@token_required
+def download_file(conversation_id, stored_name):
+    if not _is_member(conversation_id, g.user["id"]):
+        log_event("messenger_authz_deny", "DENY", "not_member", resource=f"conversation:{conversation_id}")
+        return _err("forbidden", "접근 권한이 없습니다.", 403)
+    if not UUID_RE.match(stored_name or ""):
+        return _err("not_found", "파일을 찾을 수 없습니다.", 404)
+    row = db.query_one(
+        "SELECT body FROM messenger_messages WHERE conversation_id = %s AND body LIKE %s LIMIT 1",
+        (conversation_id, f"[FILE|{stored_name}|%"))
+    directory = Path(current_app.config["UPLOAD_DIR"])
+    if not row or not (directory / stored_name).is_file():
+        return _err("not_found", "파일을 찾을 수 없습니다.", 404)
+    m = FILE_MSG_RE.match(row["body"] or "")
+    orig_name = m.group(4) if m else "attachment"
+    mime = m.group(3) if m else "application/octet-stream"
+    log_event("messenger_file_download", "INFO", "ok", conversation_id=conversation_id)
+    return uploads.send_stored(directory, stored_name, as_attachment=True,
+                               download_name=orig_name, mimetype=mime)
+
+
+# ---------- 메신저 자동 업데이트 ----------
+# 설치 파일은 서명 파일(<설치 파일>.sig)이 함께 있고 그 해시가 실제 파일과 맞을 때만 내준다. 클라이언트는 내장한 공개키로
+# 서명을 확인한 뒤에만 실행한다(포털이 HTTP 라 중간에서 파일을 바꿔치기해도 서명이 맞지 않아 실행되지 않는다).
+# 서명은 scripts/sign_messenger_setup.py 로 하고 개인키는 저장소 밖(사용자 폴더)에만 둔다.
+UPDATE_SIG_FORMAT = "nexus-messenger-update-v1"
+_setup_hash_cache = {}
+
+
+def _setup_path() -> Path:
+    return Path(current_app.config["MESSENGER_SETUP_PATH"])
+
+
+def _signed_setup():
+    """(설치 파일 경로, 정보) 또는 None. 정보: 크기·sha256·서명·빌드 시각. 서명 파일이 없거나 해시가 다르면 None."""
+    path = _setup_path()
+    sig_path = path.with_name(path.name + ".sig")
+    if not path.is_file() or not sig_path.is_file():
+        return None
+    st = path.stat()
+    key = (str(path), st.st_mtime_ns, st.st_size)
+    if key not in _setup_hash_cache:
+        _setup_hash_cache.clear()
+        digest = __import__("hashlib").sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                digest.update(chunk)
+        _setup_hash_cache[key] = digest.hexdigest()
+    try:
+        sig = json.loads(sig_path.read_text(encoding="utf-8"))
+        ok = (sig.get("format") == UPDATE_SIG_FORMAT and sig.get("sha256") == _setup_hash_cache[key]
+              and sig.get("size") == st.st_size and isinstance(sig.get("signature"), str))
+    except (OSError, ValueError, AttributeError):
+        ok = False
+    if not ok:
+        log_event("messenger_client_update_unsigned", "WARN", "signature_missing_or_mismatch")
+        return None
+    return path, {"size": st.st_size, "sha256": _setup_hash_cache[key], "signature": sig["signature"],
+                  "build_timestamp": int(st.st_mtime)}
+
+
+@bp.get("/client/version")
+@token_required
+def client_version():
+    signed = _signed_setup()
+    if not signed:
+        return jsonify(available=False, build_timestamp=0, size=0)
+    return jsonify(available=True, format=UPDATE_SIG_FORMAT, **signed[1])
+
+
+@bp.get("/client/setup")
+@token_required
+def client_setup_download():
+    signed = _signed_setup()
+    if not signed:
+        return _err("not_found", "업데이트 설치 파일이 준비되지 않았습니다.", 404)
+    path, info = signed
+    log_event("messenger_client_update_download", "INFO", "ok", bytes=info["size"])
+    return uploads.send_stored(path.parent, path.name, as_attachment=True,
+                               download_name="NEXUS_Messenger_Setup.exe", mimetype="application/octet-stream")
+
+
+def _photo_dir() -> Path:
+    return Path(current_app.config["UPLOAD_DIR"]) / "avatars"
+
+
+@bp.get("/users/<int:user_id>/photo")
+@token_required
+def get_user_photo(user_id):
+    row = db.query_one("SELECT stored_name, mime FROM profile_photos WHERE user_id = %s", (user_id,))
+    pdir = _photo_dir()
+    if not row or not (pdir / row["stored_name"]).is_file():
+        return _err("not_found", "프로필 사진이 없습니다.", 404)
+    return uploads.send_stored(pdir, row["stored_name"], as_attachment=True,
+                               download_name="avatar", mimetype=row["mime"])
+
+
+@bp.post("/account/photo")
+@token_required
+def upload_profile_photo():
+    upload = request.files.get("photo")
+    if not upload or not upload.filename:
+        return _err("empty_upload", "파일을 선택하세요.", 400)
+    data = upload.read(PHOTO_MAX_BYTES + 1)              # 본문 상한(security.ENDPOINT_LIMITS)을 넘으면 그 전에 413 이 난다
+    if len(data) > PHOTO_MAX_BYTES:
+        return _err("too_large", "프로필 사진은 10MB 이하만 올릴 수 있습니다.", 400)
+    # 원래 이름 그대로 검사해야 이중 확장자(shell.php.png) 같은 거부 규칙이 웹과 똑같이 걸린다. .jpeg 만 .jpg 로 맞춘다.
+    name = upload.filename[:-5] + ".jpg" if upload.filename.lower().endswith(".jpeg") else upload.filename
+    try:
+        ext, mime, _display, digest = uploads.inspect_upload(name, data)
+        if ext not in ("png", "jpg"):
+            raise ValueError("extension_not_allowed")
+    except ValueError as exc:
+        log_event("upload_reject", "BLOCK", str(exc), filename=upload.filename[:100], size=len(data), target="profile_photo")
+        return _err("invalid_photo", "올바른 PNG 또는 JPG 이미지 파일이 아닙니다.", 400)
+
+    pdir = _photo_dir()
+    old = db.query_one("SELECT stored_name FROM profile_photos WHERE user_id = %s FOR UPDATE", (g.user["id"],))
+    stored = uploads.store(pdir, data)
+    db.execute("DELETE FROM profile_photos WHERE user_id = %s", (g.user["id"],))
+    db.execute("INSERT INTO profile_photos(user_id, stored_name, mime, size, sha256) VALUES(%s, %s, %s, %s, %s)",
+               (g.user["id"], stored, mime, len(data), digest))
+    db.commit()
+    if old:
+        (pdir / old["stored_name"]).unlink(missing_ok=True)
+    log_event("profile_photo_changed", "INFO", "ok", size=len(data), replaced=bool(old))
+    return jsonify(ok=True, mime=mime, size=len(data)), 200
+
+
+@bp.delete("/account/photo")
+@token_required
+def delete_profile_photo():
+    pdir = _photo_dir()
+    old = db.query_one("SELECT stored_name FROM profile_photos WHERE user_id = %s FOR UPDATE", (g.user["id"],))
+    if old:
+        db.execute("DELETE FROM profile_photos WHERE user_id = %s", (g.user["id"],))
+        db.commit()
+        (pdir / old["stored_name"]).unlink(missing_ok=True)
+        log_event("profile_photo_removed", "INFO", "ok")
+    return jsonify(ok=True), 200

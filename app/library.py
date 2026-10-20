@@ -267,8 +267,9 @@ def contact_list():
             log_event("input_rejected", "DENY", "query", field="q")
             q, error, status = "", "검색어는 1~50자로 입력하세요(제어문자 사용 불가).", 400
     if tab == "company":
-        rows = db.query_all("SELECT e.name, e.dept, e.title, e.ext, e.emp_no FROM employees e "
-                            "WHERE e.name LIKE %s OR e.dept LIKE %s OR e.title LIKE %s OR e.ext LIKE %s ORDER BY e.dept, e.name LIMIT 300",
+        rows = db.query_all("SELECT e.name, e.dept, e.title, e.ext, e.emp_no FROM employees e LEFT JOIN users u ON u.id = e.user_id "
+                            "WHERE u.deleted_at IS NULL AND (e.name LIKE %s OR e.dept LIKE %s OR e.title LIKE %s OR e.ext LIKE %s) "
+                            "ORDER BY e.dept, e.name LIMIT 300",
                             (pattern, pattern, pattern, pattern))
     else:
         rows = db.query_all(

@@ -108,10 +108,9 @@ APP_DENIED = [
     "DELETE FROM leave_requests",
     # 직원 마스터(사번·입사일·연차)는 앱 계정이 바꿀 수 없다
     "UPDATE employees SET annual_days=99",
-    # 고정 계정 표시와 부서는 앱 계정이 바꿀 수 없다(직급 title 만 수정 가능)
+    # 고정 계정 표시는 앱 계정이 바꿀 수 없다(인사카드는 직급 title·부서 dept 만 수정 가능)
     "UPDATE users SET pinned=0",
     "UPDATE users SET pinned=1",
-    "UPDATE employees SET dept='보안관제팀'",
     "UPDATE employees SET emp_no='x'",
     "UPDATE employees SET hire_date=NOW()",
     "UPDATE profile_photos SET mime='x'",
@@ -132,9 +131,8 @@ APP_DENIED = [
     "UPDATE approvals SET title='x'",
     "UPDATE approval_steps SET approver_id=1",
     "UPDATE approval_steps SET step_no=1",
-    # users: 아이디·이름·부서·생성 시각은 앱 계정이 바꿀 수 없다
+    # users: 아이디·이름·생성 시각은 앱 계정이 바꿀 수 없다
     "UPDATE users SET username='x'",
-    "UPDATE users SET dept='x'",
     "UPDATE users SET display_name='x'",
     "UPDATE users SET created_at=NOW()",
     "DELETE FROM users",
@@ -169,6 +167,9 @@ APP_ALLOWED_WRITES = [  # 해당 열은 수정할 수 있어야 한다(WHERE id=
     "UPDATE lib_forms SET deleted_at=NOW() WHERE id=0",
     "UPDATE contacts SET deleted_at=NOW() WHERE id=0",
     "UPDATE employees SET title='사원' WHERE id=0",
+    "UPDATE users SET deleted_at=NOW(), deleted_by=1 WHERE id=0",
+    "UPDATE users SET dept='x' WHERE id=0",
+    "UPDATE employees SET dept='x' WHERE id=0",
     "UPDATE attendance SET check_out=NOW() WHERE id=0",
     "UPDATE leave_requests SET status='approved', decided_by=1, decided_at=NOW(), decision_reason='x' WHERE id=0",
     "UPDATE users SET password_hash='x' WHERE id=0",

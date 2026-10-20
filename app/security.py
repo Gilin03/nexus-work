@@ -23,6 +23,7 @@ GRAYLOG_FIELDS = {
     "required", "resource", "field", "kind", "count", "chars", "rows", "size", "target", "action",
     "approval_id", "requester_id", "expense_id", "steps", "board", "post_id", "attachment_id", "failed_attempts",
     "conversation_id", "members", "action_level", "lock_request_id", "trigger_event_type", "window_seconds",
+    "has_token", "token_fp",
 }
 SENSITIVE_LOG_FIELDS = {
     "password", "current_password", "new_password", "confirm_password", "token", "api_token", "access_token",
@@ -32,8 +33,12 @@ SENSITIVE_LOG_FIELDS = {
 SEVERITY_LEVELS = {"critical": 2, "high": 3, "medium": 4, "low": 5, "info": 6}
 
 
-def _is_sensitive_log_field(name):
+def _is_sensitive_log_field(name, value=None):
     normalized = str(name).lower()
+    if normalized == "has_token":
+        return not isinstance(value, bool)
+    if normalized == "token_fp":
+        return not (isinstance(value, str) and re.fullmatch(r"(?:[0-9a-f]{10}|-)", value))
     return normalized in SENSITIVE_LOG_FIELDS or any(
         part in normalized for part in ("password", "_token", "token_", "prompt", "authorization", "cookie", "secret")
     )
@@ -82,7 +87,7 @@ class GelfUdpHandler(logging.Handler):
                 "level": SEVERITY_LEVELS[severity],
             }
             for name in GRAYLOG_FIELDS:
-                if name == "ts" or name not in event or _is_sensitive_log_field(name):
+                if name == "ts" or name not in event or _is_sensitive_log_field(name, event[name]):
                     continue
                 value = severity if name == "severity" else event[name]
                 if isinstance(value, bool):
@@ -156,7 +161,7 @@ def log_event(event_type: str, decision: str = "INFO", reason: str = "", **extra
     extra.pop("user", None)
     extra.pop("request_id", None)
     for k, v in extra.items():
-        if _is_sensitive_log_field(k):
+        if _is_sensitive_log_field(k, v):
             continue
         record[k] = v if isinstance(v, (int, float, bool)) else str(v)[:200]
     _logger.info(json.dumps(record, ensure_ascii=False))
@@ -235,7 +240,10 @@ def check_csrf():
 # ---- 첨부 업로드의 본문 상한 ----
 # 첨부를 받는 요청만 상한을 푼다(설정 UPLOAD_MAX_BYTES, 비어 있으면 제한 없음). 나머지 요청은 MAX_CONTENT_LENGTH(2MB)가 그대로 적용된다.
 # 폼의 글자 칸 크기(500KB)와 한 요청의 폼 항목 수(1000)는 프레임워크 기본 보호를 유지한다.
-UPLOAD_ENDPOINTS = ("portal.post_new", "approvals.approval_new", "approvals.approval_decide", "library.file_upload", "library.form_upload")
+UPLOAD_ENDPOINTS = ("portal.post_new", "approvals.approval_new", "approvals.approval_decide", "library.file_upload", "library.form_upload", "messenger_api.send_file")
+# 첨부와 달리 상한이 따로 있는 요청: 본문을 메모리로 다 읽기 전에 413 으로 끊는다.
+ENDPOINT_LIMITS = {"messenger_api.upload_profile_photo": 10 * 1024 * 1024 + 64 * 1024,   # 사진 10MB + multipart 머리
+                   "chat.chat_send": 10 * 1024 * 1024 + 64 * 1024}                       # AI 어시스턴트 첨부 10MB(chat_attach.MAX_BYTES)
 
 
 NO_LIMIT = 1 << 62  # Flask 는 max_content_length=None 을 "설정 파일의 값을 쓴다"로 해석하므로, 제한 없음은 사실상 무한대 값으로 표현한다
@@ -244,6 +252,8 @@ NO_LIMIT = 1 << 62  # Flask 는 max_content_length=None 을 "설정 파일의 �
 def apply_upload_limit():
     if request.endpoint in UPLOAD_ENDPOINTS:
         request.max_content_length = current_app.config["UPLOAD_MAX_BYTES"] or NO_LIMIT
+    elif request.endpoint in ENDPOINT_LIMITS:
+        request.max_content_length = ENDPOINT_LIMITS[request.endpoint]
 
 
 # ---- 응답 헤더 ----

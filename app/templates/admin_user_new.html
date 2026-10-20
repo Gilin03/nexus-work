@@ -14,8 +14,16 @@
     <label>이름
       <input name="display_name" required maxlength="64" value="{{ values.get('display_name', '') }}">
     </label>
+    {% set cur = values.get('dept', '') %}
     <label>부서
-      <input name="dept" required maxlength="64" value="{{ values.get('dept', '') }}">
+      <select name="dept" id="dept" required data-new-dept="new-dept" data-new-field="new-dept-field">
+        <option value="">부서 선택</option>
+        {% for dp in depts %}<option value="{{ dp }}"{% if cur == dp %} selected{% endif %}>{{ dp }}</option>{% endfor %}
+        <option value="{{ new_dept }}"{% if cur == new_dept %} selected{% endif %}>새 부서 직접 입력</option>
+      </select>
+    </label>
+    <label id="new-dept-field">새 부서 이름 (목록에 없을 때만)
+      <input name="new_dept" id="new-dept" maxlength="64" value="{{ values.get('new_dept', '') }}" autocomplete="off">
     </label>
     <label>역할
       <select name="role" required>
@@ -28,8 +36,9 @@
         {% for t in ranks %}<option value="{{ t }}"{% if values.get('title') == t %} selected{% endif %}>{{ t }}</option>{% endfor %}
       </select>
     </label>
-    <p class="hint">직급은 역할에 맞아야 합니다(직원=사원·대리·과장, 팀장=팀장, 관리자=관리자). 부서가 <strong>{{ security_team }}</strong>이면 선택한 역할과 상관없이 최상위 권한(관리자)으로 고정됩니다.</p>
+    <p class="hint">직급은 역할에 맞아야 합니다(직원=사원·대리·과장, 팀장=팀장, 관리자=관리자).</p>
     <div class="actions"><button type="submit" class="btn primary">등록</button></div>
   </form>
 </div>
 {% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='dept-select.js') }}" defer></script>{% endblock %}
