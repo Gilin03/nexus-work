@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<nexus_wazuh_migration>
+  <agent_fim>
+    <syscheck>
+      <directories check_all="yes" realtime="yes">{{PROJECT_ROOT}}\instance\uploads</directories>
+    </syscheck>
+  </agent_fim>
+</nexus_wazuh_migration>

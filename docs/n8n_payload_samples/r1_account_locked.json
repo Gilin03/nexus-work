@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.1",
+  "action_level": "contain",
+  "rule": {
+    "id": "R1",
+    "stable_name": "ACCOUNT_COMPROMISE",
+    "display_name": "[NEXUS][R1] 계정 침해 의심"
+  },
+  "alert": {
+    "id": "01M59BBT2EM7FBF6G6RTAJ82BS",
+    "event_definition_id": "6ad5ac319d0f6c101dafd65b",
+    "title": "[NEXUS][R1] 계정 침해 의심",
+    "timestamp": "2026-10-19T05:50:15.614Z",
+    "priority": 4,
+    "key": "account_locked|example_user|11de0b50a5f4b995c0d0346f348ee78e"
+  },
+  "event": {
+    "event_type": "account_locked",
+    "source_component": "portal",
+    "user": "example_user",
+    "role": "-",
+    "src_ip": "192.0.2.21",
+    "request_id": "11de0b50a5f4b995c0d0346f348ee78e",
+    "decision": "BLOCK",
+    "reason": "max_failures",
+    "severity": "medium"
+  }
+}

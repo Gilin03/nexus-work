@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.1",
+  "action_level": "alert",
+  "rule": {
+    "id": "R10",
+    "stable_name": "DIRECT_CONFIDENTIAL_ACCESS_DENIED",
+    "display_name": "[NEXUS][R10] 기밀 문서 직접 접근 거부"
+  },
+  "alert": {
+    "id": "01M5933M3G4FRHVSB6SJMEXF2E",
+    "event_definition_id": "6ad58d029d0f6c101daf8541",
+    "title": "[NEXUS][R10] 기밀 문서 직접 접근 거부",
+    "timestamp": "2026-10-19T03:25:57.832Z",
+    "priority": 3,
+    "key": "example_user|/payroll/9427|payroll:9427"
+  },
+  "event": {
+    "event_type": "authz_deny",
+    "user": "example_user",
+    "role": "employee",
+    "src_ip": "192.0.2.10",
+    "path": "/payroll/9427",
+    "resource": "payroll:9427",
+    "decision": "DENY",
+    "reason": "out_of_scope",
+    "severity": "medium"
+  }
+}

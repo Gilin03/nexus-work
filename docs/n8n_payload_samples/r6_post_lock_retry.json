@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.1",
+  "action_level": "alert",
+  "rule": {
+    "id": "R6",
+    "stable_name": "POST_LOCK_RETRY",
+    "display_name": "[NEXUS][R6] 잠금 후 로그인 재시도"
+  },
+  "alert": {
+    "id": "01M59BC38NS87B7SQQ65BFY5G4",
+    "event_definition_id": "6ad5aa649d0f6c101dafd3cc",
+    "title": "[NEXUS][R6] 잠금 후 로그인 재시도",
+    "timestamp": "2026-10-19T05:50:24.443Z",
+    "priority": 3,
+    "key": "11de0b50a5f4b995c0d0346f348ee78e"
+  },
+  "event": {
+    "event_type": "post_lock_retry_detected",
+    "source_component": "portal",
+    "user": "example_user",
+    "role": "-",
+    "src_ip": "192.0.2.6",
+    "request_id": "bef1d0e937454d06c6c1384bce0fe8f4",
+    "lock_request_id": "11de0b50a5f4b995c0d0346f348ee78e",
+    "trigger_event_type": "login_locked",
+    "count": 3,
+    "window_seconds": 300,
+    "decision": "WARN",
+    "reason": "post_lock_retry_threshold_reached",
+    "severity": "high"
+  }
+}
