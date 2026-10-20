@@ -9,8 +9,10 @@ CREATE TABLE users (
   failed_count  INT UNSIGNED NOT NULL DEFAULT 0,
   locked_until  DATETIME     NULL,
   session_version INT UNSIGNED NOT NULL DEFAULT 0,   -- 로그아웃·비밀번호 변경 때 올려 이전 세션 쿠키를 모두 무효화한다
-  pinned        TINYINT(1)   NOT NULL DEFAULT 0,     -- 1 이면 최상위(admin) 권한 고정 계정: 보안관제팀 소속과 시스템관리자(아래 트리거가 정한다)
-  created_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
+  pinned        TINYINT(1)   NOT NULL DEFAULT 0,     -- 1 이면 최고관리자 고정 계정: admin·hongjh 두 계정뿐(아래 트리거가 정한다)
+  created_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  deleted_at    DATETIME     NULL,                   -- 삭제한 계정(로그인·목록에서 빠지고 기록은 남는다). 최고관리자만 삭제한다
+  deleted_by    INT UNSIGNED NULL
 ) ENGINE=InnoDB;
 
 -- 직원 주소록(일반 정보). 계정이 없는 직원도 있을 수 있다.
@@ -416,13 +418,14 @@ BEGIN
 END//
 DELIMITER ;
 
--- 최상위 권한 고정: 보안관제팀 소속과 시스템관리자(admin) 계정은 만들 때 admin 역할 + pinned 로 정해지고, 이후 역할을 낮추거나 pinned 를 풀 수 없다
--- (앱 계정도, 이 트리거를 지우지 않는 한 root 도 못 바꾼다). 소속 부서는 앱 계정이 바꿀 수 없으므로(grants.sql) 부서 이동으로 빠져나갈 수도 없다.
+-- 최고관리자 고정(사용자 결정 2026-10-20): admin(시스템관리자)·hongjh 두 계정만 만들 때 admin 역할 + pinned 로 정해지고,
+-- 이후 역할을 낮추거나 pinned 를 풀거나 삭제 처리할 수 없다(앱 계정도, 이 트리거를 지우지 않는 한 root 도 못 바꾼다).
+-- 다른 계정(보안관제팀 포함)은 일반 관리 규칙대로 역할을 바꿀 수 있다.
 DELIMITER //
 CREATE TRIGGER trg_users_pin_insert BEFORE INSERT ON users
 FOR EACH ROW
 BEGIN
-  IF NEW.dept = '보안관제팀' OR NEW.username = 'admin' THEN
+  IF NEW.username IN ('admin', 'hongjh') THEN
     SET NEW.role = 'admin';
     SET NEW.pinned = 1;
   END IF;
@@ -430,7 +433,7 @@ END//
 CREATE TRIGGER trg_users_pin_update BEFORE UPDATE ON users
 FOR EACH ROW
 BEGIN
-  IF OLD.pinned = 1 AND (NEW.role <> 'admin' OR NEW.pinned <> 1) THEN
+  IF OLD.pinned = 1 AND (NEW.role <> 'admin' OR NEW.pinned <> 1 OR NEW.deleted_at IS NOT NULL) THEN
     SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'pinned account keeps the admin role';
   END IF;
   IF OLD.pinned = 0 AND NEW.pinned = 1 AND NEW.role <> 'admin' THEN

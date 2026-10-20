@@ -213,11 +213,11 @@ def pending_count(user_id) -> int:
 # ---------- 결재선·참조 ----------
 def approver_candidates(user):
     return db.query_all("SELECT id, display_name, dept, role FROM users "
-                        "WHERE role IN ('manager', 'admin') AND id <> %s ORDER BY dept, display_name", (user["id"],))
+                        "WHERE role IN ('manager', 'admin') AND id <> %s AND deleted_at IS NULL ORDER BY dept, display_name", (user["id"],))
 
 
 def cc_candidates(user):
-    return db.query_all("SELECT id, display_name, dept, role FROM users WHERE id <> %s ORDER BY dept, display_name", (user["id"],))
+    return db.query_all("SELECT id, display_name, dept, role FROM users WHERE id <> %s AND deleted_at IS NULL ORDER BY dept, display_name", (user["id"],))
 
 
 def parse_approvers(form, requester):
@@ -238,7 +238,7 @@ def parse_approvers(form, requester):
     if requester["id"] in ids:
         raise ValueError("approver_self")
     for approver_id in ids:
-        row = db.query_one("SELECT role FROM users WHERE id = %s", (approver_id,))
+        row = db.query_one("SELECT role FROM users WHERE id = %s AND deleted_at IS NULL", (approver_id,))
         if not row or row["role"] not in APPROVER_ROLES:
             raise ValueError("approver_invalid")
     return ids
@@ -264,7 +264,7 @@ def parse_cc(form, requester, approver_ids):
     if any(i in approver_ids for i in ids):
         raise ValueError("cc_approver")
     for cc_id in ids:
-        if not db.query_one("SELECT id FROM users WHERE id = %s", (cc_id,)):
+        if not db.query_one("SELECT id FROM users WHERE id = %s AND deleted_at IS NULL", (cc_id,)):
             raise ValueError("cc_invalid")
     return ids
 

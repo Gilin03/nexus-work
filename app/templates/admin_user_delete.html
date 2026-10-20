@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}사용자 삭제 · NEXUS WORK{% endblock %}
+{% block content %}
+<a class="crumb" href="{{ url_for('admin.users') }}">&larr; 사용자 관리</a>
+<h1>사용자 삭제</h1>
+<div class="sheet narrow">
+  {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+  <table class="kv">
+    <tbody>
+      <tr><th>아이디</th><td>{{ target.username }}</td></tr>
+      <tr><th>이름</th><td>{{ target.display_name }}</td></tr>
+      <tr><th>부서</th><td>{{ target.dept }}</td></tr>
+      <tr><th>역할</th><td>{{ target.role }}</td></tr>
+    </tbody>
+  </table>
+  <p class="hint">삭제하면 이 계정으로 더 이상 로그인할 수 없고, 열려 있는 로그인과 메신저 연결이 바로 끊깁니다. 사용자 목록·결재선·담당자·참석자·조직도·주소록에서 빠집니다.
+    결재·업무·게시글 같은 지난 기록과 인사카드는 그대로 남고, 같은 아이디로 새 계정을 만들 수는 없습니다. 같은 사람이 다시 입사하면 사용자 관리의 "삭제된 계정"에서 복구할 수 있습니다.</p>
+  <form method="post" action="{{ url_for('admin.delete_user', user_id=target.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>확인을 위해 삭제할 계정의 아이디(<strong>{{ target.username }}</strong>)를 입력하세요
+      <input name="confirm_username" required maxlength="32" autocomplete="off">
+    </label>
+    <div class="actions">
+      <button type="submit" class="btn danger">삭제</button>
+      <a class="btn" href="{{ url_for('admin.users') }}">취소</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

@@ -44,8 +44,16 @@ class Config:
         self.LOGIN_LOCK_MINUTES = 15
         self.LOGIN_IP_LIMIT = 20  # 분당 POST /login 상한(IP)
 
-        # 챗봇: 사용자당 분당 메시지 상한
+        # 챗봇: 사용자당 분당 메시지 상한 및 무료 AI 모델 연동 설정
         self.CHAT_USER_LIMIT = 20
+        self.AI_PROVIDER = os.environ.get("AI_PROVIDER", "auto").strip().lower()
+        self.AI_TIMEOUT = int(os.environ.get("AI_TIMEOUT", "60") or 60)
+        self.OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434").strip()
+        self.OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b").strip()
+        self.GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
+        self.GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash").strip()
+        self.GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
+        self.GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b").strip()
 
     def as_flask(self):
         return {k: v for k, v in vars(self).items() if k.isupper()}

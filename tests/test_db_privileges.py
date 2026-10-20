@@ -169,6 +169,7 @@ APP_ALLOWED_WRITES = [  # 해당 열은 수정할 수 있어야 한다(WHERE id=
     "UPDATE lib_forms SET deleted_at=NOW() WHERE id=0",
     "UPDATE contacts SET deleted_at=NOW() WHERE id=0",
     "UPDATE employees SET title='사원' WHERE id=0",
+    "UPDATE users SET deleted_at=NOW(), deleted_by=1 WHERE id=0",
     "UPDATE attendance SET check_out=NOW() WHERE id=0",
     "UPDATE leave_requests SET status='approved', decided_by=1, decided_at=NOW(), decision_reason='x' WHERE id=0",
     "UPDATE users SET password_hash='x' WHERE id=0",

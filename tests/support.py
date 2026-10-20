@@ -42,10 +42,11 @@ def cleanup(con):
         cur.execute(f"DELETE FROM expenses WHERE user_id IN {_ZZ}")
         cur.execute(f"DELETE FROM payroll WHERE user_id IN {_ZZ}")
         cur.execute(f"DELETE FROM chat_messages WHERE user_id IN {_ZZ}")
+        cur.execute(f"DELETE FROM api_tokens WHERE user_id IN {_ZZ}")
         cur.execute("DELETE FROM documents WHERE title LIKE 'zz\\_%'")
         cur.execute("DELETE FROM confidential_documents WHERE title LIKE 'zz\\_%'")
         cur.execute("DELETE FROM financial_reports WHERE title LIKE 'zz\\_%'")
-        cur.execute("DELETE FROM employees WHERE name LIKE 'zz%'")
+        cur.execute(f"DELETE FROM employees WHERE name LIKE 'zz%' OR user_id IN {_ZZ}")   # 시험 계정의 인사카드는 이름과 상관없이
         cur.execute("DELETE FROM users WHERE username LIKE 'zz\\_%'")
 
 

@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}계정 복구 · NEXUS WORK{% endblock %}
+{% block content %}
+<a class="crumb" href="{{ url_for('admin.users') }}">&larr; 사용자 관리</a>
+<h1>계정 복구(재입사)</h1>
+<div class="sheet narrow">
+  {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+  <table class="kv">
+    <tbody>
+      <tr><th>아이디</th><td>{{ target.username }}</td></tr>
+      <tr><th>이름</th><td>{{ target.display_name }}</td></tr>
+      <tr><th>부서</th><td>{{ target.dept }}</td></tr>
+      <tr><th>삭제 전 역할·직급</th><td>{{ target.role }} · {{ target.title or '-' }}</td></tr>
+      <tr><th>삭제 시각</th><td>{{ target.deleted_at.strftime('%Y-%m-%d %H:%M') }}</td></tr>
+    </tbody>
+  </table>
+  <p class="hint">복구하면 이 계정으로 다시 로그인할 수 있고, 인사카드와 지난 결재·업무·게시글 기록이 그대로 다시 연결됩니다. 예전 비밀번호는 쓸 수 없고 새 임시 비밀번호를 한 번만 보여 줍니다.
+    역할과 직급은 재입사 기준으로 다시 고르세요(예전에 관리자였어도 자동으로 관리자가 되지 않습니다).</p>
+  <form method="post" action="{{ url_for('admin.restore_user', user_id=target.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>역할
+      <select name="role" required>
+        {% for r in roles %}<option value="{{ r }}"{% if values.get('role', 'employee') == r %} selected{% endif %}>{{ r }} ({{ titles[r] }})</option>{% endfor %}
+      </select>
+    </label>
+    <label>직급 (비우면 역할의 기본 직급)
+      <select name="title">
+        <option value="">기본</option>
+        {% for t in ranks %}<option value="{{ t }}"{% if values.get('title') == t %} selected{% endif %}>{{ t }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>확인을 위해 복구할 계정의 아이디(<strong>{{ target.username }}</strong>)를 입력하세요
+      <input name="confirm_username" required maxlength="32" autocomplete="off">
+    </label>
+    <div class="actions">
+      <button type="submit" class="btn primary">복구</button>
+      <a class="btn" href="{{ url_for('admin.users') }}">취소</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

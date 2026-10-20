@@ -42,8 +42,13 @@ def _history(user_id, limit):
 
 
 def _render(error=None, status=200):
+    from . import ai
+    is_placeholder = current_app.config["CHAT_RESPONDER"] is placeholder_responder
     return render_template("chat.html", messages=_history(g.user["id"], HISTORY_SHOWN), error=error,
-                           placeholder=current_app.config["CHAT_RESPONDER"] is placeholder_responder,
+                           placeholder=is_placeholder,
+                           ai_badge=None if is_placeholder else ai.provider_badge(current_app.config),
+                           ai_options=[] if is_placeholder else ai.provider_options(current_app.config),
+                           ai_selected=ai.selected_choice(current_app.config),
                            max_message=MAX_MESSAGE, limit=current_app.config["CHAT_USER_LIMIT"]), status
 
 

@@ -40,7 +40,7 @@ def _load_token_user():
         "SELECT t.id AS token_id, u.id, u.username, u.role, u.display_name, u.dept, "
         "(u.locked_until IS NOT NULL AND u.locked_until > NOW()) AS is_locked "
         "FROM api_tokens t JOIN users u ON u.id = t.user_id "
-        "WHERE t.token_hash = %s AND t.revoked_at IS NULL AND t.expires_at > NOW()", (token_hash,))
+        "WHERE t.token_hash = %s AND t.revoked_at IS NULL AND t.expires_at > NOW() AND u.deleted_at IS NULL", (token_hash,))
     if not row or row["is_locked"]:
         return None
     g.token_id = row["token_id"]
@@ -108,7 +108,7 @@ def api_logout():
 def list_users():
     q = request.args.get("q", "").strip()
     if not q:
-        rows = db.query_all("SELECT id, username, display_name, dept FROM users WHERE id <> %s "
+        rows = db.query_all("SELECT id, username, display_name, dept FROM users WHERE id <> %s AND deleted_at IS NULL "
                             "ORDER BY display_name LIMIT 50", (g.user["id"],))
         return jsonify(users=rows)
     try:
@@ -116,7 +116,7 @@ def list_users():
     except ValueError:
         return _err("invalid_query", "검색어는 1~50자로 입력하세요.", 400)
     rows = db.query_all("SELECT id, username, display_name, dept FROM users "
-                        "WHERE id <> %s AND (display_name LIKE %s OR username LIKE %s OR dept LIKE %s) "
+                        "WHERE id <> %s AND deleted_at IS NULL AND (display_name LIKE %s OR username LIKE %s OR dept LIKE %s) "
                         "ORDER BY display_name LIMIT 50", (g.user["id"], pattern, pattern, pattern))
     return jsonify(users=rows)
 
@@ -163,7 +163,7 @@ def create_conversation():
     # 가변 개수 id 조회는 이 프로젝트의 기존 관례(erp.py 의 팀 범위 조회)와 같이 FIND_IN_SET 을 쓴다
     # (IN (...) 을 동적으로 만들면 tests/test_sql_static.py 의 "SQL은 항상 상수 문자열" 규칙에 걸린다).
     ids_csv = ",".join(str(m) for m in member_ids)
-    existing = db.query_all("SELECT id FROM users WHERE FIND_IN_SET(id, %s)", (ids_csv,))
+    existing = db.query_all("SELECT id FROM users WHERE FIND_IN_SET(id, %s) AND deleted_at IS NULL", (ids_csv,))
     if len(existing) != len(member_ids):
         return _err("invalid_members", "존재하지 않는 사용자가 포함되어 있습니다.", 400)
 

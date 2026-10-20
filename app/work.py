@@ -71,7 +71,7 @@ MESSAGES = {
 
 
 def _users():
-    return db.query_all("SELECT id, display_name, dept FROM users ORDER BY dept, display_name LIMIT 300")
+    return db.query_all("SELECT id, display_name, dept FROM users WHERE deleted_at IS NULL ORDER BY dept, display_name LIMIT 300")
 
 
 def _fail(field, key):
@@ -186,7 +186,7 @@ def task_new():
         except ValueError:
             raise ValueError("description")
         assignee_id = _positive(values["assignee_id"] or str(g.user["id"]))
-        if assignee_id is None or not db.query_one("SELECT id FROM users WHERE id = %s", (assignee_id,)):
+        if assignee_id is None or not db.query_one("SELECT id FROM users WHERE id = %s AND deleted_at IS NULL", (assignee_id,)):
             raise ValueError("assignee")
         if values["priority"] not in PRIORITY:
             raise ValueError("priority")
@@ -271,7 +271,7 @@ def task_assign(task_id):
     if g.user["id"] != t["creator_id"] and g.user["role"] != "admin":
         return forbidden("not_creator", resource=f"task:{task_id}")
     new = _positive(request.form.get("assignee_id", ""))
-    ok = new and db.query_one("SELECT id FROM users WHERE id = %s", (new,)) and (not t["project_id"] or _is_member(t["project_id"], new))
+    ok = new and db.query_one("SELECT id FROM users WHERE id = %s AND deleted_at IS NULL", (new,)) and (not t["project_id"] or _is_member(t["project_id"], new))
     if not ok or t["status"] not in ("todo", "doing"):
         log_event("input_rejected", "DENY", "assignee", field="task_assign")
         return conflict("담당자를 바꿀 수 없습니다(진행 중인 업무에서, 프로젝트 업무는 구성원에게만 가능합니다).")
@@ -423,7 +423,7 @@ def event_new():
         ids = []
         if len(values["attendees"]) > MAX_ATTENDEES * 2:
             raise ValueError("ev_attendee")
-        known = {r["id"] for r in db.query_all("SELECT id FROM users LIMIT 1000")}
+        known = {r["id"] for r in db.query_all("SELECT id FROM users WHERE deleted_at IS NULL LIMIT 1000")}
         for raw in values["attendees"]:
             n = _positive(raw)
             if n is None or n not in known:
@@ -749,7 +749,7 @@ def project_member_add(project_id):
     if not _manage_project(p):
         return forbidden("not_owner", resource=f"project:{project_id}")
     uid = _positive(request.form.get("user_id", ""))
-    if not uid or not db.query_one("SELECT id FROM users WHERE id = %s", (uid,)):
+    if not uid or not db.query_one("SELECT id FROM users WHERE id = %s AND deleted_at IS NULL", (uid,)):
         log_event("input_rejected", "DENY", "user", field="project_member")
         return conflict("추가할 직원을 선택하세요.")
     n = db.execute_rowcount("INSERT IGNORE INTO project_members(project_id, user_id) VALUES(%s, %s)", (project_id, uid))

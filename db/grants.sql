@@ -4,9 +4,9 @@ CREATE USER IF NOT EXISTS 'nexus_app'@'%' IDENTIFIED BY '__APP_PW__';
 CREATE USER IF NOT EXISTS 'nexus_conf'@'%' IDENTIFIED BY '__CONF_PW__';
 
 -- users: 로그인 처리(비밀번호 해시·실패 횟수·잠금)와 관리자 역할 변경에 필요한 열만 수정 가능.
--- 아이디·이름·부서를 앱 계정이 바꿀 수 없다.
+-- 아이디·이름·부서를 앱 계정이 바꿀 수 없다. 사용자 삭제는 행을 지우지 않고 deleted_at·deleted_by 로 표시한다(DELETE 권한 없음).
 GRANT SELECT, INSERT         ON `__DB__`.users         TO 'nexus_app'@'%';
-GRANT UPDATE (password_hash, failed_count, locked_until, role, session_version) ON `__DB__`.users TO 'nexus_app'@'%';
+GRANT UPDATE (password_hash, failed_count, locked_until, role, session_version, deleted_at, deleted_by) ON `__DB__`.users TO 'nexus_app'@'%';
 -- 직원: 조회와 등록(관리자 화면의 계정 등록이 인사카드를 함께 만든다)만. 수정·삭제는 불가(사번·입사일·연차 보호).
 GRANT SELECT, INSERT         ON `__DB__`.employees     TO 'nexus_app'@'%';
 -- 직급(승진·강등)은 관리자 화면에서 바꾼다. 다른 열(사번·입사일·연차·부서·이름)은 그대로 수정 불가.

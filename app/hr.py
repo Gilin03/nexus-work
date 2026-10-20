@@ -115,8 +115,9 @@ def card_detail(emp_id):
 @bp.get("/org")
 @login_required
 def org_chart():
-    rows = db.query_all("SELECT name, dept, title, ext FROM employees "
-                        "ORDER BY dept, FIELD(title, '관리자', '팀장', '과장', '대리', '사원'), name")
+    rows = db.query_all("SELECT e.name, e.dept, e.title, e.ext FROM employees e LEFT JOIN users u ON u.id = e.user_id "
+                        "WHERE u.deleted_at IS NULL "                       # 삭제된 계정의 직원은 조직도에서 뺀다(인사카드 기록은 남는다)
+                        "ORDER BY e.dept, FIELD(title, '관리자', '팀장', '과장', '대리', '사원'), name")
     depts = {}
     for r in rows:
         depts.setdefault(r["dept"], []).append(r)

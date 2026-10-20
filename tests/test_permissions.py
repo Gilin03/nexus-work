@@ -35,22 +35,28 @@ def state(root, name):
 
 
 # =====================================================================================
-# 고정 계정
+# 최고관리자 고정 계정(admin·hongjh)과 사용자 삭제
 # =====================================================================================
-def test_security_team_members_are_created_as_pinned_admins_whatever_role_is_asked(root):
-    sql(root, "INSERT INTO users(username,password_hash,role,display_name,dept) VALUES('zz_s1',%s,'employee','zz_s1','보안관제팀')", (PW_HASH,))
-    assert state(root, "zz_s1") == ("admin", 1)
-    sql(root, "INSERT INTO users(username,password_hash,role,display_name,dept) VALUES('zz_s2',%s,'manager','zz_s2','보안관제팀')", (PW_HASH,))
-    assert state(root, "zz_s2") == ("admin", 1)
-    assert state(root, "zz_emp") == ("employee", 0) and state(root, "zz_adm") == ("admin", 0)          # 다른 팀은 영향 없음
+@pytest.fixture()
+def pinned_sec(root):
+    """시험용 최고관리자: zz_sec 를 고정 계정으로 올린다(고정은 admin 역할일 때만 가능, 이름 규칙은 실제 계정 admin·hongjh 용)."""
+    sql(root, "UPDATE users SET pinned=1 WHERE username='zz_sec'")
+    return uid(root, "zz_sec")
 
 
-def test_system_admin_account_is_pinned_by_name(root):
+@pytest.mark.parametrize("name", ["admin", "hongjh"])
+def test_only_admin_and_hongjh_are_pinned_on_insert_whatever_role_is_asked(root, name):
     try:
-        sql(root, "INSERT INTO users(username,password_hash,role,display_name,dept) VALUES('admin',%s,'employee','시스템관리자','경영지원팀')", (PW_HASH,))
-        assert state(root, "admin") == ("admin", 1)
+        sql(root, "INSERT INTO users(username,password_hash,role,display_name,dept) VALUES(%s,%s,'employee','x','A팀')", (name, PW_HASH))
+        assert state(root, name) == ("admin", 1)
     finally:
-        sql(root, "DELETE FROM users WHERE username='admin'")
+        sql(root, "DELETE FROM users WHERE username=%s", (name,))
+
+
+def test_security_team_members_are_no_longer_forced_or_pinned(root):
+    sql(root, "INSERT INTO users(username,password_hash,role,display_name,dept) VALUES('zz_s1',%s,'employee','zz_s1','보안관제팀')", (PW_HASH,))
+    assert state(root, "zz_s1") == ("employee", 0)
+    assert state(root, "zz_sec") == ("admin", 0)                                                         # 보안관제팀 관리자도 고정 아님
 
 
 @pytest.mark.parametrize("statement", [
@@ -58,71 +64,220 @@ def test_system_admin_account_is_pinned_by_name(root):
     "UPDATE users SET role='manager' WHERE username='zz_sec'",
     "UPDATE users SET pinned=0 WHERE username='zz_sec'",
     "UPDATE users SET role='employee', pinned=0 WHERE username='zz_sec'",
+    "UPDATE users SET deleted_at=NOW() WHERE username='zz_sec'",
 ])
-def test_database_refuses_to_demote_or_unpin_a_pinned_account_even_for_root(root, statement):
+def test_database_refuses_to_demote_unpin_or_delete_a_pinned_account_even_for_root(root, pinned_sec, statement):
     with pytest.raises(pymysql.err.OperationalError) as exc:
         sql(root, statement)
     assert exc.value.args[0] == 1644 and "pinned" in exc.value.args[1]
-    assert state(root, "zz_sec") == ("admin", 1)
+    assert sql(root, "SELECT role, pinned, deleted_at FROM users WHERE username='zz_sec'")[0] == ("admin", 1, None)
 
 
-def test_database_allows_everything_else_about_a_pinned_account(root):
-    sql(root, "UPDATE users SET failed_count=3, session_version=session_version+1 WHERE username='zz_sec'")
+def test_database_allows_everything_else_about_a_pinned_account(root, pinned_sec):
+    sql(root, "UPDATE users SET failed_count=3, session_version=session_version+1, locked_until=NULL WHERE username='zz_sec'")
     sql(root, "UPDATE users SET role='admin' WHERE username='zz_sec'")
-    sql(root, "UPDATE users SET pinned=1 WHERE username='zz_adm'", ())                                  # 고정으로 올리는 것은 admin 일 때만 가능
-    assert state(root, "zz_adm") == ("admin", 1)
     with pytest.raises(pymysql.err.OperationalError):
         sql(root, "UPDATE users SET pinned=1 WHERE username='zz_emp'")                                  # 직원을 그대로 고정할 수는 없다
 
 
-def test_admin_screens_cannot_change_lock_or_reset_a_pinned_account(aapp, root, events):
+def test_admin_screens_cannot_change_lock_reset_or_delete_a_pinned_account(aapp, root, events, pinned_sec):
     adm = as_user(aapp, "zz_adm")
-    target = uid(root, "zz_sec")
-    before = sql(root, "SELECT password_hash, locked_until, session_version FROM users WHERE id=%s", (target,))
-    assert post(adm, f"/admin/users/{target}/role", role="employee", current_role="admin").status_code == 403
-    assert post(adm, f"/admin/users/{target}/lock").status_code == 403
-    assert post(adm, f"/admin/users/{target}/reset-password").status_code == 403
+    before = sql(root, "SELECT password_hash, locked_until, session_version FROM users WHERE id=%s", (pinned_sec,))
+    assert post(adm, f"/admin/users/{pinned_sec}/role", role="employee", current_role="admin").status_code == 403
+    assert post(adm, f"/admin/users/{pinned_sec}/lock").status_code == 403
+    assert post(adm, f"/admin/users/{pinned_sec}/reset-password").status_code == 403
     assert state(root, "zz_sec") == ("admin", 1)
-    assert sql(root, "SELECT password_hash, locked_until, session_version FROM users WHERE id=%s", (target,)) == before
+    assert sql(root, "SELECT password_hash, locked_until, session_version FROM users WHERE id=%s", (pinned_sec,)) == before
     denied = [e for e in events() if e["event_type"] == "admin_action" and e["reason"] == "pinned_account"]
     assert {e["action"] for e in denied} == {"role_change", "lock", "password_reset"}
+    sql(root, "UPDATE users SET pinned=1 WHERE username='zz_adm'")                                      # 다른 최고관리자도 고정 계정은 못 지운다
+    adm2 = as_user(aapp, "zz_adm")
+    assert adm2.get(f"/admin/users/{pinned_sec}/delete").status_code == 403
+    assert post(adm2, f"/admin/users/{pinned_sec}/delete", confirm_username="zz_sec").status_code == 403
 
 
-def test_pinned_admin_can_still_manage_other_people_and_unlock(aapp, root):
+def test_non_pinned_security_team_admin_can_now_be_changed(aapp, root):
+    adm = as_user(aapp, "zz_adm")
+    target = uid(root, "zz_sec")
+    assert post(adm, f"/admin/users/{target}/role", role="manager", current_role="admin").status_code == 303
+    assert state(root, "zz_sec") == ("manager", 0)
+
+
+def test_pinned_admin_can_still_manage_other_people_and_unlock(aapp, root, pinned_sec):
     sec = as_user(aapp, "zz_sec")
     target = uid(root, "zz_emp2")
     assert post(sec, f"/admin/users/{target}/role", role="manager", current_role="employee").status_code == 303
     assert state(root, "zz_emp2")[0] == "manager"
     sql(root, "UPDATE users SET failed_count=4 WHERE username='zz_sec'")
-    assert post(as_user(aapp, "zz_adm"), f"/admin/users/{uid(root, 'zz_sec')}/unlock").status_code == 303   # 잠금 해제는 막지 않는다
+    assert post(as_user(aapp, "zz_adm"), f"/admin/users/{pinned_sec}/unlock").status_code == 303           # 잠금 해제는 막지 않는다
     assert sql(root, "SELECT failed_count FROM users WHERE username='zz_sec'")[0][0] == 0
 
 
-def test_failed_login_lockout_still_protects_pinned_accounts(aapp, root):
+def test_failed_login_lockout_still_protects_pinned_accounts(aapp, root, pinned_sec):
     c = aapp.test_client()
     for _ in range(5):
         login(c, "zz_sec", "틀린-비밀번호-1!")
     assert login(aapp.test_client(), "zz_sec").status_code == 401                                        # 5회 실패 후에는 올바른 비밀번호도 거부
 
 
-def test_user_list_marks_pinned_accounts_and_hides_their_controls(aapp, root):
+def test_user_list_marks_pinned_accounts_and_hides_their_controls(aapp, root, pinned_sec):
     html = as_user(aapp, "zz_adm").get("/admin/users").get_data(as_text=True)
     rows = html.split("<tr>")
     pinned = next(r for r in rows if "<td>zz_sec" in r)
-    assert "고정" in pinned and "<form" not in pinned and "비밀번호 초기화" not in pinned and ">잠금<" not in pinned
+    assert "고정" in pinned and "<form" not in pinned and "비밀번호 초기화" not in pinned and ">잠금<" not in pinned and ">삭제<" not in pinned
     other = next(r for r in rows if "<td>zz_emp2</td>" in r)
     assert "비밀번호 초기화" in other and 'name="role"' in other and "고정" not in other
+    assert ">삭제<" not in other                                                                         # 최고관리자가 아니면 삭제 단추가 없다
+    sec_view = as_user(aapp, "zz_sec").get("/admin/users").get_data(as_text=True)
+    assert ">삭제<" in next(r for r in sec_view.split("<tr>") if "<td>zz_emp2</td>" in r)
 
 
-def test_registering_a_security_team_user_forces_admin_and_pins(aapp, root, events):
+def test_registering_a_security_team_user_keeps_the_chosen_role(aapp, root, events):
     adm = as_user(aapp, "zz_adm")
-    r = post(adm, "/admin/users/new", username="zz_newsec", display_name="신규 관제", dept="보안관제팀", role="employee")
-    assert r.status_code == 200
-    assert state(root, "zz_newsec") == ("admin", 1)
-    assert sql(root, "SELECT title FROM employees WHERE user_id=%s", (uid(root, "zz_newsec"),))[0][0] == "관리자"
-    ev = [e for e in events() if e.get("action") == "user_create"][-1]
-    assert ev["role"] == "admin" and ev["pinned"] is True
-    sql(root, "DELETE FROM employees WHERE user_id=%s", (uid(root, "zz_newsec"),))
+    assert post(adm, "/admin/users/new", username="zz_newsec", display_name="zz 신규 관제", dept="보안관제팀", role="employee").status_code == 200
+    assert state(root, "zz_newsec") == ("employee", 0)
+    assert sql(root, "SELECT title FROM employees WHERE user_id=%s", (uid(root, "zz_newsec"),))[0][0] == "사원"
+
+
+# ---------- 사용자 삭제 ----------
+def test_only_pinned_admins_can_open_or_use_delete(aapp, root, events, pinned_sec):
+    target = make_user(root, "zz_del", "employee", "A팀", "사원")
+    for who in ("zz_adm", "zz_mgr", "zz_emp"):                                                         # 일반 관리자도 불가
+        c = as_user(aapp, who)
+        assert c.get(f"/admin/users/{target}/delete").status_code == 403, who
+        assert post(c, f"/admin/users/{target}/delete", confirm_username="zz_del").status_code == 403, who
+    assert sql(root, "SELECT deleted_at FROM users WHERE id=%s", (target,))[0][0] is None
+    assert any(e.get("required") == "users.delete" for e in events() if e["event_type"] == "authz_deny")
+    assert "zz_del" in as_user(aapp, "zz_sec").get(f"/admin/users/{target}/delete").get_data(as_text=True)
+
+
+def test_delete_requires_typing_the_username(aapp, root, pinned_sec):
+    target = make_user(root, "zz_del", "employee", "A팀", "사원")
+    sec = as_user(aapp, "zz_sec")
+    for wrong in ("", "zz_de", "ZZ_DEL", "zz_emp"):
+        r = post(sec, f"/admin/users/{target}/delete", confirm_username=wrong)
+        assert r.status_code == 400 and "일치하지 않습니다" in r.get_data(as_text=True), wrong
+    assert sql(root, "SELECT deleted_at FROM users WHERE id=%s", (target,))[0][0] is None
+
+
+def test_delete_marks_the_account_cuts_sessions_tokens_and_login(aapp, root, events, pinned_sec):
+    target = make_user(root, "zz_del", "employee", "A팀", "사원")
+    sql(root, "INSERT INTO api_tokens(user_id, token_hash, device, expires_at) VALUES(%s, %s, 'zz', DATE_ADD(NOW(), INTERVAL 1 DAY))",
+        (target, "0" * 64))
+    victim = as_user(aapp, "zz_del")
+    assert victim.get("/hr/leave").status_code == 200
+    assert post(as_user(aapp, "zz_sec"), f"/admin/users/{target}/delete", confirm_username="zz_del").status_code == 303
+    deleted_at, deleted_by = sql(root, "SELECT deleted_at, deleted_by FROM users WHERE id=%s", (target,))[0]
+    assert deleted_at is not None and deleted_by == pinned_sec
+    r = victim.get("/hr/leave")
+    assert r.status_code == 303 and "/login" in r.headers["Location"]                                    # 열린 세션은 바로 끊긴다
+    r = login(aapp.test_client(), "zz_del")
+    assert r.status_code == 401 and "로그인할 수 없습니다" in r.get_data(as_text=True)                   # 없는 계정과 같은 응답
+    assert sql(root, "SELECT revoked_at IS NOT NULL FROM api_tokens WHERE user_id=%s", (target,))[0][0] == 1
+    ev = [e for e in events() if e.get("action") == "user_delete"][-1]
+    assert ev["reason"] == "user_delete" and ev["target"] == "zz_del" and ev["tokens_revoked"] == 1
+    fail = [e for e in events() if e["event_type"] == "login_failure"][-1]
+    assert fail["reason"] == "unknown_user"
+
+
+def test_deleted_account_disappears_from_lists_and_pickers_but_records_stay(aapp, root, pinned_sec):
+    target = make_user(root, "zz_del", "manager", "A팀", "팀장")
+    sql(root, "INSERT INTO posts(board,author_id,title,body) VALUES('free',%s,'zz_삭제자의 글','본문')", (target,))
+    post(as_user(aapp, "zz_sec"), f"/admin/users/{target}/delete", confirm_username="zz_del")
+    viewer = as_user(aapp, "zz_emp")
+    users_page = as_user(aapp, "zz_adm").get("/admin/users").get_data(as_text=True)
+    main, _, deleted_part = users_page.partition("삭제된 계정")
+    assert "<td>zz_del</td>" not in main and "zz_del" in deleted_part                                    # 삭제 목록으로 옮겨진다
+    assert 'value="%d"' % target not in viewer.get("/approvals/new").get_data(as_text=True)              # 결재선·참조 후보에서 빠짐
+    assert 'value="%d"' % target not in viewer.get("/work/tasks/new").get_data(as_text=True)             # 업무 담당자 후보에서 빠짐
+    assert "zz_del" not in viewer.get("/hr/org").get_data(as_text=True)                                   # 조직도에서 빠짐
+    assert "zz_del" not in viewer.get("/library/contacts").get_data(as_text=True)                          # 주소록 사내 직원에서 빠짐
+    assert "zz_삭제자의 글" in viewer.get("/boards/free").get_data(as_text=True)                            # 지난 기록은 남는다
+    r = post(viewer, "/work/tasks/new", title="zz 맡기기", assignee_id=target, priority="normal")
+    assert r.status_code == 400                                                                          # 삭제된 사람에게는 업무를 맡길 수 없다
+
+
+def test_cannot_delete_self_unknown_or_twice_and_username_is_not_reused(aapp, root, pinned_sec):
+    sec = as_user(aapp, "zz_sec")
+    assert sec.get(f"/admin/users/{pinned_sec}/delete").status_code == 403                               # 본인
+    assert post(sec, "/admin/users/999999/delete", confirm_username="x").status_code == 404
+    target = make_user(root, "zz_del", "employee", "A팀", "사원")
+    assert post(sec, f"/admin/users/{target}/delete", confirm_username="zz_del").status_code == 303
+    assert post(sec, f"/admin/users/{target}/delete", confirm_username="zz_del").status_code == 404      # 이미 삭제됨
+    for path in ("role", "lock", "reset-password", "unlock"):                                             # 삭제된 계정은 다른 관리 대상도 아니다
+        assert post(sec, f"/admin/users/{target}/{path}", role="manager", current_role="employee").status_code == 404, path
+    assert post(sec, "/admin/users/new", username="zz_del", display_name="다시", dept="A팀", role="employee").status_code == 409
+
+
+# ---------- 복구(재입사) ----------
+def deleted_user(aapp, root, name="zz_back", role="admin", title="관리자"):
+    target = make_user(root, name, role, "A팀", title)
+    assert post(as_user(aapp, "zz_sec"), f"/admin/users/{target}/delete", confirm_username=name).status_code == 303
+    return target
+
+
+def temp_password_of(response):
+    import re
+    return re.search(r'<code class="secret">([^<]+)</code>', response.get_data(as_text=True)).group(1)
+
+
+def test_restore_brings_back_the_same_account_with_a_new_password_and_chosen_role(aapp, root, events, pinned_sec):
+    target = deleted_user(aapp, root)                                                                     # 예전엔 관리자였던 사람
+    sql(root, "INSERT INTO posts(board,author_id,title,body) VALUES('free',%s,'zz_예전 글','본문')", (target,))
+    sec = as_user(aapp, "zz_sec")
+    assert "zz_back" in sec.get(f"/admin/users/{target}/restore").get_data(as_text=True)
+    r = post(sec, f"/admin/users/{target}/restore", role="employee", title="대리", confirm_username="zz_back")
+    assert r.status_code == 200 and "계정을 복구했습니다" in r.get_data(as_text=True)
+    pw = temp_password_of(r)
+    row = sql(root, "SELECT deleted_at, deleted_by, role FROM users WHERE id=%s", (target,))[0]
+    assert row == (None, None, "employee")                                                               # 관리자로 자동 복귀하지 않는다
+    assert sql(root, "SELECT title FROM employees WHERE user_id=%s", (target,))[0][0] == "대리"
+    assert login(aapp.test_client(), "zz_back").status_code == 401                                      # 예전 비밀번호는 무효
+    assert login(aapp.test_client(), "zz_back", pw).status_code == 303                                  # 새 임시 비밀번호로 로그인
+    back = aapp.test_client()
+    login(back, "zz_back", pw)
+    assert "zz_예전 글" in back.get("/boards/free").get_data(as_text=True)                                # 지난 기록은 같은 계정에 다시 연결
+    assert "zz_back" in as_user(aapp, "zz_emp").get("/hr/org").get_data(as_text=True)                     # 조직도에 다시 나온다
+    ev = [e for e in events() if e.get("action") == "user_restore"][-1]
+    assert ev["reason"] == "user_restore" and ev["role"] == "employee" and ev["title"] == "대리"
+    assert pw not in str(events())                                                                       # 임시 비밀번호는 기록하지 않는다
+
+
+def test_restore_rules(aapp, root, pinned_sec):
+    target = deleted_user(aapp, root)
+    for who in ("zz_adm", "zz_mgr", "zz_emp"):                                                          # 최고관리자만
+        c = as_user(aapp, who)
+        assert c.get(f"/admin/users/{target}/restore").status_code == 403, who
+        assert post(c, f"/admin/users/{target}/restore", role="employee", confirm_username="zz_back").status_code == 403, who
+    sec = as_user(aapp, "zz_sec")
+    for wrong in ("", "zz_bac", "ZZ_BACK"):
+        r = post(sec, f"/admin/users/{target}/restore", role="employee", confirm_username=wrong)
+        assert r.status_code == 400 and "일치하지 않습니다" in r.get_data(as_text=True), wrong
+    for role, title in (("ceo", ""), ("employee", "팀장"), ("manager", "사원"), ("admin", "대리")):
+        assert post(sec, f"/admin/users/{target}/restore", role=role, title=title, confirm_username="zz_back").status_code == 400, (role, title)
+    assert sql(root, "SELECT deleted_at IS NOT NULL FROM users WHERE id=%s", (target,))[0][0] == 1        # 아무것도 바뀌지 않았다
+    assert post(sec, f"/admin/users/{target}/restore", role="manager", confirm_username="zz_back").status_code == 200
+    assert sql(root, "SELECT role FROM users WHERE id=%s", (target,))[0][0] == "manager"
+    assert sql(root, "SELECT title FROM employees WHERE user_id=%s", (target,))[0][0] == "팀장"            # 직급을 비우면 역할의 기본 직급
+    assert sec.get(f"/admin/users/{target}/restore").status_code == 404                                  # 삭제되지 않은 계정은 복구 대상이 아니다
+    assert post(sec, f"/admin/users/{uid(root, 'zz_emp')}/restore", role="employee", confirm_username="zz_emp").status_code == 404
+    assert sec.get("/admin/users/999999/restore").status_code == 404
+
+
+def test_deleted_list_shows_restore_only_to_pinned_admins(aapp, root, pinned_sec):
+    deleted_user(aapp, root)
+    sec_html = as_user(aapp, "zz_sec").get("/admin/users").get_data(as_text=True).split("삭제된 계정")[-1]
+    adm_html = as_user(aapp, "zz_adm").get("/admin/users").get_data(as_text=True).split("삭제된 계정")[-1]
+    assert "복구(재입사)" in sec_html and "zz_back" in adm_html and "복구(재입사)" not in adm_html
+
+
+def test_overview_and_permission_counts_skip_deleted_accounts(aapp, root, pinned_sec):
+    sec = as_user(aapp, "zz_sec")
+    before = sql(root, "SELECT COUNT(*) FROM users WHERE deleted_at IS NULL")[0][0]
+    target = make_user(root, "zz_del", "employee", "A팀", "사원")
+    post(sec, f"/admin/users/{target}/delete", confirm_username="zz_del")
+    html = sec.get("/admin/overview").get_data(as_text=True)
+    assert f'stat-n">{before}</span><span class="stat-l">전체 사용자' in html                           # 전체 사용자 수에 삭제 계정 미포함
 
 
 # =====================================================================================
@@ -204,10 +359,14 @@ CASES = [  # (아이디, 역할, 부서, 직급)
 ]
 
 
+TARGET = {}
+
+
 @pytest.fixture()
 def world(aapp, root):
     """다른 부서(Z팀)의 대상자 한 명(급여·인사카드)과 CASES 의 사용자들을 만든다."""
     target = make_user(root, "zz_target", "employee", "Z팀", "사원")
+    TARGET["id"] = target
     sql(root, "INSERT INTO payroll(user_id,pay_month,base_salary,bonus) VALUES(%s,'2026-09',1000000,0)", (target,))
     for name, role, dept, title in CASES:
         make_user(root, name, role, dept, title)
@@ -223,6 +382,7 @@ def probe_results(app, name):
         "security.dashboard": c.get("/admin/audit").status_code == 200,
         "doc.confidential": c.get("/confidential").status_code == 200,
         "users.manage": c.get("/admin/users").status_code == 200,
+        "users.delete": c.get(f"/admin/users/{TARGET["id"]}/delete").status_code == 200,
         "payroll.all": "zz_target" in c.get("/payroll").get_data(as_text=True),
         "hr.cards.all": "zz_target" in c.get("/hr/cards").get_data(as_text=True),
     }
@@ -273,10 +433,10 @@ def test_matrix_is_computed_from_the_same_rules():
     assert {l: c for l, _n, c in only_finance}["재무 보고 열람"] == [False, False, True, True, True]
 
 
-def test_permissions_page_shows_matrix_pinned_accounts_and_rank_counts(aapp, root):
+def test_permissions_page_shows_matrix_pinned_accounts_and_rank_counts(aapp, root, pinned_sec):
     make_user(root, "zz_tit", "employee", "A팀", "과장")
     html = as_user(aapp, "zz_adm").get("/admin/permissions").get_data(as_text=True)
-    for text in ("최상위 권한 고정 계정", "zz_sec", "직급별 권한", "팀별 전용 권한", "역할별 접근 범위", "전사 급여 조회", "보안 대시보드·감사 로그·내보내기",
+    for text in ("최고관리자 고정 계정", "zz_sec", "사용자 삭제", "직급별 권한", "팀별 전용 권한", "역할별 접근 범위", "전사 급여 조회", "보안 대시보드·감사 로그·내보내기",
                  "경영지원팀·재무팀 (과장 이상)"):
         assert text in html, text
     assert html.count("사원<br>") == 1 and "과장<br>" in html

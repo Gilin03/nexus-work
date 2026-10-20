@@ -115,7 +115,8 @@ def test_user_text_and_reply_are_escaped(aapp, root):
     say(c, "<script>alert(1)</script><img src=x onerror=alert(2)>")
     html = c.get("/chat").get_data(as_text=True)                       # 시험 응답은 입력을 그대로 되돌려 준다
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html and "&lt;img src=x onerror=alert(2)&gt;" in html
-    assert "<script" not in html and "<img" not in html
+    page = html.replace('<script src="/static/chat.js" defer></script>', "")                                                    # 포털 자체의 같은 출처 스크립트만 빼고 본다
+    assert "<script" not in page and "<img" not in page
 
 
 def test_assistant_output_is_never_interpreted_as_html(aapp, root):
@@ -124,7 +125,8 @@ def test_assistant_output_is_never_interpreted_as_html(aapp, root):
     say(c, "아무거나")
     html = c.get("/chat").get_data(as_text=True)
     assert "&lt;script&gt;steal()&lt;/script&gt;" in html and "&lt;a href=&#34;javascript:alert(1)&#34;&gt;" in html
-    assert "<script" not in html and "<a href=\"javascript" not in html
+    page = html.replace('<script src="/static/chat.js" defer></script>', "")
+    assert "<script" not in page and "<a href=\"javascript" not in page
 
 
 # ---------- 응답기 접점 ----------

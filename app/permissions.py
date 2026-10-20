@@ -4,7 +4,8 @@
   직급은 인사카드(employees.title)에서 읽되 역할의 범위로 잘라 쓴다: employee 는 사원~과장, manager 는 팀장, admin 은 관리자.
   (인사카드가 없는 계정은 역할의 가장 낮은 직급으로 본다.) 직급을 올려도 역할이 바뀌지 않으므로 결재자 자격 같은 역할 규칙은 그대로다.
 - 팀(부서) 권한은 그 팀 소속 + 직급 조건이 함께 맞아야 한다: 보안관제팀=보안 대시보드, 경영지원·재무팀 과장 이상=재무 보고·전사 급여, 경영지원·인사팀 과장 이상=전사 인사카드.
-- 고정 계정(users.pinned): 보안관제팀 소속과 시스템관리자는 항상 admin 이다(DB 트리거가 보장, 앱도 변경·잠금·초기화 화면을 막는다).
+- 최고관리자 고정 계정(users.pinned): admin(시스템관리자)·hongjh 두 계정만 항상 admin 이다(DB 트리거가 보장, 앱도 변경·잠금·초기화·삭제를 막는다).
+  사용자 삭제는 이 두 계정만 할 수 있다(users.delete). 보안관제팀의 다른 계정은 일반 관리자처럼 역할을 바꿀 수 있다(사용자 결정 2026-10-20).
 - 새 권한을 더할 때는 PERMS 에 한 줄을 추가하고, 서버의 해당 경로에 permission_required/can 을 건 뒤, tests/test_permissions.py 에서 실제 응답과 맞는지 확인한다."""
 from functools import wraps
 
@@ -20,7 +21,8 @@ ALLOWED_TITLES = {"employee": ("사원", "대리", "과장"), "manager": ("팀�
 SECURITY_TEAM = "보안관제팀"
 FINANCE_TEAMS = ("경영지원팀", "재무팀")
 HR_TEAMS = ("경영지원팀", "인사팀")
-SYSTEM_ADMIN = "admin"                       # 시스템관리자 계정 아이디(DB 트리거의 값과 같다)
+SYSTEM_ADMIN = "admin"                       # 시스템관리자 계정 아이디
+PINNED_USERS = ("admin", "hongjh")           # 최고관리자 고정 계정(DB 트리거의 값과 같다)
 
 
 def rank_of(role, title):
@@ -54,8 +56,9 @@ PERMS = [
     ("project.create", "프로젝트 만들기", lambda s: _manager_up(s) or s["rank"] >= SENIOR, "과장 이상"),
     ("folder.create", "자료실 폴더 만들기", lambda s: _manager_up(s) or s["rank"] >= SENIOR, "과장 이상(최상위 폴더는 자기 부서 공개로 고정)"),
     ("users.manage", "사용자 관리·역할·직급 변경", lambda s: s["role"] == "admin", "관리자(역할 admin)"),
+    ("users.delete", "사용자 삭제·복구(재입사)", lambda s: s["role"] == "admin" and s["pinned"], "최고관리자(admin·hongjh)만"),
     ("security.dashboard", "보안 대시보드·감사 로그·내보내기",
-     lambda s: s["role"] == "admin" and (s["pinned"] or s["dept"] == SECURITY_TEAM), "보안관제팀 소속 또는 시스템관리자(고정 계정)만"),
+     lambda s: s["role"] == "admin" and (s["pinned"] or s["dept"] == SECURITY_TEAM), "보안관제팀 소속 관리자 또는 최고관리자(admin·hongjh)만"),
 ]
 PERMS_BY_KEY = {p[0]: p for p in PERMS}
 
