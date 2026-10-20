@@ -403,3 +403,25 @@ ol.top li { padding: 0.1rem 0; }
 .top-n { float: right; font-weight: 800; }
 pre.raw { white-space: pre-wrap; word-break: break-all; max-width: 28rem; margin: 0.3rem 0 0; padding: 0.5rem; background: var(--paper); border: 1px solid var(--line-soft); border-radius: var(--radius); font-size: 0.8rem; }
 table.audit details summary { cursor: pointer; color: var(--pen); }
+
+/* ---- 홈 대시보드 ---- */
+.home-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
+.home-head h1 { margin-bottom: 0.2rem; }
+.attend-card { display: flex; align-items: center; gap: 1rem; padding: 0.8rem 1.2rem; }
+.attend-state { margin: 0; }
+.home-stats { grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); }
+.home-stats .stat a { display: flex; flex-direction: column; gap: 0.2rem; color: inherit; text-decoration: none; }
+.home-stats .stat:hover { border-color: var(--pen); }
+.quick { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0 0 1.2rem; }
+.dash { display: grid; grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr)); gap: 1rem; }
+.dash > .sheet { margin: 0; }
+.widget-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem; border-bottom: 2px solid var(--line-soft); margin-bottom: 0.4rem; }
+.widget-head h2 { margin: 0 0 0.4rem; font-size: 1.02rem; }
+.widget-head a { font-size: 0.85rem; white-space: nowrap; }
+ul.rows { list-style: none; margin: 0; padding: 0; }
+ul.rows li { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0.2rem 0.8rem; padding: 0.45rem 0; border-bottom: 1px solid var(--line-soft); }
+ul.rows li:last-child { border-bottom: 0; }
+ul.rows li > a { font-weight: 600; text-decoration: none; color: var(--ink); }
+ul.rows li > a:hover { color: var(--pen); text-decoration: underline; }
+.when { color: var(--pen); font-variant-numeric: tabular-nums; margin-right: 0.3rem; }
+@media (max-width: 40rem) { .dash { grid-template-columns: 1fr; } .attend-card { width: 100%; justify-content: space-between; } }

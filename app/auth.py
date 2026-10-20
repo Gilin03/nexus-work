@@ -164,8 +164,8 @@ def authenticate(raw_name: str, password: str):
 @bp.get("/")
 @login_required
 def home():
-    # 임시 홈: 이후 단계에서 포털 화면으로 대체된다.
-    return render_template("home.html")
+    from . import dashboard                      # 홈 대시보드(본인 범위 요약). 순환 import 를 피하려고 여기서 불러온다
+    return render_template("home.html", d=dashboard.build(g.user))
 
 
 @bp.route("/login", methods=["GET", "POST"])

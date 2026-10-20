@@ -1,36 +1,135 @@
 {% extends "base.html" %}
 {% block title %}홈 · NEXUS WORK{% endblock %}
 {% block content %}
-<h1>{{ g.user.display_name }}님, 안녕하세요</h1>
-<p class="hint">{{ g.user.dept }} · 권한 {{ g.user.role }}</p>
+<div class="home-head">
+  <div>
+    <h1>{{ g.user.display_name }}님, 안녕하세요</h1>
+    <p class="hint">{{ d.today.year }}년 {{ d.today.month }}월 {{ d.today.day }}일 {{ d.weekday }}요일 · {{ g.user.dept }}{% if g.user.title %} {{ g.user.title }}{% endif %}</p>
+  </div>
+  <div class="attend-card sheet" aria-label="오늘 근태">
+    {% set a = d.attendance %}
+    <p class="attend-state">
+      {% if not a %}<span class="tk tk-todo">출근 전</span>
+      {% elif not a.check_out %}<span class="tk tk-doing">근무 중</span> <span class="hint">{{ a.check_in.strftime('%H:%M') }} 출근{% if a.check_in.time().strftime('%H:%M') > '09:00' %} · 지각{% endif %}</span>
+      {% else %}<span class="tk tk-done">퇴근</span> <span class="hint">{{ a.check_in.strftime('%H:%M') }} ~ {{ a.check_out.strftime('%H:%M') }}</span>{% endif %}
+    </p>
+    {% if not a %}
+    <form method="post" action="{{ url_for('hr.check_in') }}" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="next" value="home">
+      <button type="submit" class="btn primary">출근하기</button>
+    </form>
+    {% elif not a.check_out %}
+    <form method="post" action="{{ url_for('hr.check_out') }}" class="inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="next" value="home">
+      <button type="submit" class="btn">퇴근하기</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
 {% if pending_approvals %}
 <p class="notice" role="status">결재할 문서가 {{ pending_approvals }}건 있습니다. <a href="{{ url_for('approvals.approval_list', box='wait') }}">결재 대기 문서함으로 가기</a></p>
 {% endif %}
-<div class="sheet">
-  <h2>업무</h2>
-  <ul class="menu-list">
-    <li><a href="{{ url_for('chat.chat_view') }}">AI 어시스턴트</a></li>
-    <li><a href="{{ url_for('approvals.approval_list') }}">전자결재</a></li>
-    <li><a href="{{ url_for('erp.expense_list') }}">경비</a></li>
-    {% if g.user.role in ('manager', 'admin') %}<li><a href="{{ url_for('erp.finance_list') }}">재무 보고</a></li>{% endif %}
-  </ul>
-  <h2>자료</h2>
-  <ul class="menu-list">
-    <li><a href="{{ url_for('portal.documents') }}">문서함</a></li>
-    {% if g.user.role in ('manager', 'admin') %}<li><a href="{{ url_for('portal.confidential_list') }}">기밀 문서함</a></li>{% endif %}
-    <li><a href="{{ url_for('portal.board_list', board='notice') }}">공지사항</a></li>
-    <li><a href="{{ url_for('portal.board_list', board='free') }}">자유게시판</a></li>
-    <li><a href="{{ url_for('library.contact_list') }}">주소록</a></li>
-  </ul>
-  <h2>인사</h2>
-  <ul class="menu-list">
-    <li><a href="{{ url_for('erp.payroll_list') }}">급여</a></li>
-  </ul>
-  {% if g.user.role == 'admin' %}
-  <h2>관리</h2>
-  <ul class="menu-list">
-    <li><a href="{{ url_for('admin.users') }}">사용자 관리</a></li>
-  </ul>
+
+<ul class="stat-grid home-stats" aria-label="요약">
+  <li class="sheet stat"><a href="{{ url_for('approvals.approval_list', box='wait') }}"><span class="stat-n">{{ pending_approvals or 0 }}</span><span class="stat-l">내가 결재할 문서</span></a></li>
+  <li class="sheet stat"><a href="{{ url_for('approvals.approval_list', box='mine') }}"><span class="stat-n">{{ d.mine | length }}</span><span class="stat-l">진행 중인 내 기안</span></a></li>
+  <li class="sheet stat"><a href="{{ url_for('work.task_list') }}"><span class="stat-n">{{ d.open_tasks }}</span><span class="stat-l">진행 중인 내 업무</span></a></li>
+  <li class="sheet stat"><a href="{{ url_for('hr.leave_list') }}"><span class="stat-n">{{ '%g' % d.leave.remain }}</span><span class="stat-l">남은 연차(일)</span></a></li>
+</ul>
+
+<nav class="quick" aria-label="바로 가기">
+  <a class="btn" href="{{ url_for('approvals.approval_new') }}">결재 상신</a>
+  <a class="btn" href="{{ url_for('hr.leave_new') }}">휴가 신청</a>
+  <a class="btn" href="{{ url_for('work.task_new') }}">업무 등록</a>
+  <a class="btn" href="{{ url_for('work.event_new') }}">일정 등록</a>
+  <a class="btn" href="{{ url_for('work.reservation_list') }}">회의실 예약</a>
+  <a class="btn" href="{{ url_for('library.search') }}">문서 검색</a>
+  <a class="btn" href="{{ url_for('chat.chat_view') }}">AI 어시스턴트</a>
+</nav>
+
+<div class="dash">
+  <section class="sheet widget">
+    <div class="widget-head"><h2>내가 결재할 문서</h2><a href="{{ url_for('approvals.approval_list', box='wait') }}">전체 보기</a></div>
+    {% if d.waiting %}
+    <ul class="rows">
+      {% for a in d.waiting %}
+      <li><a href="{{ url_for('approvals.approval_view', approval_id=a.id) }}">{% if a.urgency == 'urgent' %}<span class="st st-rejected">긴급</span> {% endif %}{{ a.title }}</a>
+        <span class="hint">{{ a.type_label }} · {{ a.requester }} · {{ a.created_at.strftime('%m-%d') }}</span></li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="hint">지금 처리할 결재가 없습니다.</p>{% endif %}
+  </section>
+
+  <section class="sheet widget">
+    <div class="widget-head"><h2>내 업무</h2><a href="{{ url_for('work.task_list') }}">전체 보기</a></div>
+    {% if d.tasks %}
+    <ul class="rows">
+      {% for t in d.tasks %}
+      <li><a href="{{ url_for('work.task_detail', task_id=t.id) }}">{{ t.title }}</a>
+        <span class="hint"><span class="tk tk-{{ t.status }}">{{ d.task_statuses[t.status] }}</span>
+        {% if t.due_date %} · 마감 {{ t.due_date.strftime('%m-%d') }}{% endif %}{% if t.overdue %} <span class="flag">지연</span>{% elif t.due_today %} <span class="flag">오늘 마감</span>{% endif %}</span></li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="hint">맡은 진행 중 업무가 없습니다.</p>{% endif %}
+  </section>
+
+  <section class="sheet widget">
+    <div class="widget-head"><h2>이번 주 일정</h2><a href="{{ url_for('work.calendar') }}">달력 보기</a></div>
+    {% if d.events %}
+    <ul class="rows">
+      {% for e in d.events %}
+      <li><a href="{{ url_for('work.event_detail', event_id=e.id) }}"><strong class="when">{{ e.day_label }} {{ e.time_label }}</strong> {{ e.title }}</a>
+        {% if e.location %}<span class="hint">{{ e.location }}</span>{% endif %}</li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="hint">앞으로 7일 안에 일정이 없습니다.</p>{% endif %}
+  </section>
+
+  <section class="sheet widget">
+    <div class="widget-head"><h2>내가 올린 결재</h2><a href="{{ url_for('approvals.approval_list', box='mine') }}">전체 보기</a></div>
+    {% if d.mine %}
+    <ul class="rows">
+      {% for a in d.mine %}
+      <li><a href="{{ url_for('approvals.approval_view', approval_id=a.id) }}">{{ a.title }}</a>
+        <span class="hint">{{ a.doc_no }} · {{ a.current_step }}/{{ a.total }}단계 진행 중</span></li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="hint">진행 중인 기안이 없습니다.</p>{% endif %}
+  </section>
+
+  <section class="sheet widget">
+    <div class="widget-head"><h2>공지사항</h2><a href="{{ url_for('portal.board_list', board='notice') }}">전체 보기</a></div>
+    {% if d.notices %}
+    <ul class="rows">
+      {% for p in d.notices %}
+      <li><a href="{{ url_for('portal.post_view', post_id=p.id) }}">{{ p.title }}</a> <span class="hint">{{ p.author }} · {{ p.created_at.strftime('%m-%d') }}</span></li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="hint">공지가 없습니다.</p>{% endif %}
+  </section>
+
+  <section class="sheet widget">
+    <div class="widget-head"><h2>내 예약</h2><a href="{{ url_for('work.reservation_list') }}">예약 현황</a></div>
+    {% if d.reservations %}
+    <ul class="rows">
+      {% for r in d.reservations %}
+      <li><strong class="when">{{ r.start_at.strftime('%m-%d %H:%M') }}~{{ r.end_at.strftime('%H:%M') }}</strong> {{ r.resource }} <span class="hint">{{ r.purpose }}</span></li>
+      {% endfor %}
+    </ul>
+    {% else %}<p class="hint">예정된 예약이 없습니다.</p>{% endif %}
+  </section>
+
+  {% if d.admin %}
+  <section class="sheet widget">
+    <div class="widget-head"><h2>관리</h2><a href="{{ url_for('admin.overview') }}">관리 현황</a></div>
+    <ul class="rows">
+      <li><a href="{{ url_for('admin.users') }}">사용자 관리</a> <span class="hint">사용자 {{ d.admin.users }}명{% if d.admin.locked %} · 잠긴 계정 {{ d.admin.locked }}{% endif %}</span></li>
+      <li><a href="{{ url_for('hr.leave_list') }}">휴가 승인 대기</a> <span class="hint">{{ d.admin.leaves }}건</span></li>
+      {% if can('security.dashboard') %}<li><a href="{{ url_for('admin.audit_log') }}">보안 대시보드</a></li>{% endif %}
+      <li><a href="{{ url_for('admin.permissions') }}">권한 현황</a></li>
+    </ul>
+  </section>
   {% endif %}
 </div>
 {% endblock %}
