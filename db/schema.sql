@@ -13,6 +13,20 @@ CREATE TABLE users (
   created_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB;
 
+-- R1/R6 상관 판정에 필요한 인증 이벤트 최소 증거. 원문/비밀번호/token은 저장하지 않는다.
+CREATE TABLE security_auth_events (
+  id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  request_id      CHAR(32)     NOT NULL,
+  event_type      VARCHAR(32)  NOT NULL,
+  username        VARCHAR(64)  NOT NULL,
+  src_ip          VARCHAR(45)  NOT NULL,
+  occurred_at     DATETIME(6)  NOT NULL,
+  r6_emitted_at   DATETIME(6)  NULL,
+  r1_emitted_at   DATETIME(6)  NULL,
+  KEY idx_security_auth_user_type_time (username, event_type, occurred_at),
+  KEY idx_security_auth_lock_ip_time (event_type, username, src_ip, occurred_at)
+) ENGINE=InnoDB;
+
 -- 직원 주소록(일반 정보). 계정이 없는 직원도 있을 수 있다.
 CREATE TABLE employees (
   id      INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,

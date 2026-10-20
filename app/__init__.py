@@ -26,7 +26,11 @@ def create_app(overrides=None):
     app.config.update(overrides or {})
     app.config["DEBUG"] = False  # 디버거·상세 오류 화면 노출 금지
 
-    security.init_logging(app.config["LOG_DIR"])
+    security.init_logging(
+        app.config["LOG_DIR"],
+        graylog_host=app.config["GRAYLOG_GELF_HOST"] if app.config["GRAYLOG_GELF_ENABLED"] else None,
+        graylog_port=app.config["GRAYLOG_GELF_PORT"],
+    )
 
     app.register_blueprint(auth.bp)
     app.register_blueprint(portal.bp)

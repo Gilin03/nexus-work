@@ -9,10 +9,14 @@
 
 앱이 지키는 것: 로그인 필요, CSRF, 입력 길이·문자 검증, 사용자당 속도 제한, 대화 기록은 본인 것만 조회·표시, 응답도 이스케이프.
 대화 내용은 DB(chat_messages)에만 저장하고 보안 로그에는 글자 수만 남긴다."""
-from flask import Blueprint, current_app, g, redirect, render_template, request, url_for
+import re
+import secrets
+
+from flask import Blueprint, current_app, g, redirect, render_template, request, session, url_for
 
 from . import db, validators
 from .auth import login_required
+from .prompt_injection import detect_direct_prompt_injection
 from .security import ip_rate_limited, log_event
 
 bp = Blueprint("chat", __name__)
@@ -65,6 +69,24 @@ def chat_send():
     except ValueError as exc:
         log_event("input_rejected", "DENY", str(exc), field="chat")
         return _render(MESSAGE_ERROR, 400)
+
+    pattern_id = detect_direct_prompt_injection(message)
+    if pattern_id:
+        session_id = session.get("nexus_session_id")
+        if not isinstance(session_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{24,64}", session_id):
+            session_id = secrets.token_urlsafe(24)
+            session["nexus_session_id"] = session_id
+        log_event(
+            "prompt_injection_detected",
+            "DENY",
+            "direct_prompt_injection",
+            injection_type="direct",
+            source_type="chat",
+            pattern_id=pattern_id,
+            severity="high",
+            session_id=session_id,
+        )
+        return _render("보안 정책 위반 가능성이 있어 메시지를 차단했습니다.", 403)
 
     history = [{"sender": r["sender"], "content": r["content"]} for r in _history(user["id"], HISTORY_FOR_RESPONDER)]
     # 사용자 메시지는 응답을 기다리기 전에 먼저 확정한다(응답 생성이 실패·지연되어도 기록은 남는다).

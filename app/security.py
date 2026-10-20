@@ -1,9 +1,11 @@
 """보안 공통: JSON 이벤트 로그, CSRF, 응답 헤더, IP 단위 요청 제한."""
+import gzip
 import hmac
 import json
 import logging
 import re
 import secrets
+import socket
 import time
 from collections import defaultdict, deque
 from datetime import datetime, timezone
@@ -14,8 +16,104 @@ from flask import abort, current_app, g, request, session
 _logger = logging.getLogger("nexus.security")
 _logger.propagate = False
 
+GRAYLOG_FIELDS = {
+    "event_type", "source_component", "severity", "user", "role", "src_ip", "method", "path",
+    "decision", "reason", "request_id", "session_id", "injection_type", "source_type", "trigger_source",
+    "tool_name", "resource_class", "resource_id", "trigger_resource_id", "pattern_id", "caller_service",
+    "required", "resource", "field", "kind", "count", "chars", "rows", "size", "target", "action",
+    "approval_id", "requester_id", "expense_id", "steps", "board", "post_id", "attachment_id", "failed_attempts",
+    "conversation_id", "members", "action_level", "lock_request_id", "trigger_event_type", "window_seconds",
+}
+SENSITIVE_LOG_FIELDS = {
+    "password", "current_password", "new_password", "confirm_password", "token", "api_token", "access_token",
+    "refresh_token", "authorization", "cookie", "prompt", "prompt_text", "prompt_raw", "message", "body",
+    "content", "secret",
+}
+SEVERITY_LEVELS = {"critical": 2, "high": 3, "medium": 4, "low": 5, "info": 6}
 
-def init_logging(log_dir):
+
+def _is_sensitive_log_field(name):
+    normalized = str(name).lower()
+    return normalized in SENSITIVE_LOG_FIELDS or any(
+        part in normalized for part in ("password", "_token", "token_", "prompt", "authorization", "cookie", "secret")
+    )
+
+
+class GelfUdpHandler(logging.Handler):
+    """Send a small, redacted GELF 1.1 event without coupling request success to UDP delivery."""
+
+    def __init__(self, host, port):
+        super().__init__()
+        self.host = host
+        self.port = int(port)
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+    @staticmethod
+    def _severity(event):
+        severity = event.get("severity")
+        if not isinstance(severity, str) or severity not in SEVERITY_LEVELS:
+            severity = {"ERROR": "high", "DENY": "medium", "BLOCK": "medium", "WARN": "low"}.get(
+                event.get("decision"), "info"
+            )
+        return severity
+
+    @staticmethod
+    def _timestamp(value):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.timestamp()
+        except (AttributeError, TypeError, ValueError):
+            return time.time()
+
+    def emit(self, record):
+        try:
+            event = json.loads(record.getMessage())
+            event_type = event.get("event_type", "security_event")
+            if not isinstance(event_type, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", event_type):
+                event_type = "security_event"
+            severity = self._severity(event)
+            payload = {
+                "version": "1.1",
+                "host": "nexus-portal",
+                "short_message": event_type,
+                "timestamp": self._timestamp(event.get("ts")),
+                "level": SEVERITY_LEVELS[severity],
+            }
+            for name in GRAYLOG_FIELDS:
+                if name == "ts" or name not in event or _is_sensitive_log_field(name):
+                    continue
+                value = severity if name == "severity" else event[name]
+                if isinstance(value, bool):
+                    value = "true" if value else "false"
+                elif isinstance(value, (int, float)):
+                    pass
+                elif isinstance(value, str):
+                    if len(value) > 200 or any(ord(char) < 32 or ord(char) == 127 for char in value):
+                        continue
+                    if name == "reason" and not re.fullmatch(r"[A-Za-z0-9_.:/>\-]{1,120}", value):
+                        continue
+                else:
+                    continue
+                payload[f"_{name}"] = value
+
+            encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            packet = gzip.compress(encoded)
+            if len(packet) <= 8192:
+                self.socket.sendto(packet, (self.host, self.port))
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            # UDP is best-effort: a Graylog outage must not break portal requests or recurse into this logger.
+            return
+
+    def close(self):
+        try:
+            self.socket.close()
+        finally:
+            super().close()
+
+
+def init_logging(log_dir, graylog_host=None, graylog_port=12201):
     """호출할 때마다 핸들러를 교체해 현재 설정의 로그 경로만 쓰게 한다."""
     log_dir.mkdir(parents=True, exist_ok=True)
     for h in list(_logger.handlers):
@@ -24,6 +122,8 @@ def init_logging(log_dir):
     handler = RotatingFileHandler(log_dir / "security.jsonl", maxBytes=5_000_000, backupCount=3, encoding="utf-8")
     handler.setFormatter(logging.Formatter("%(message)s"))
     _logger.addHandler(handler)
+    if graylog_host:
+        _logger.addHandler(GelfUdpHandler(graylog_host, graylog_port))
     _logger.setLevel(logging.INFO)
 
 
@@ -31,9 +131,20 @@ def log_event(event_type: str, decision: str = "INFO", reason: str = "", **extra
     """모든 이벤트가 같은 필드 구조를 가진다. 비밀번호·토큰은 기록하지 않는다.
     값은 json.dumps 로 직렬화되므로 개행·따옴표를 넣어 로그 줄을 위조할 수 없다."""
     user = getattr(g, "user", None) or {}
+    request_id = getattr(g, "nexus_request_id", None)
+    if request_id is None:
+        request_id = secrets.token_hex(16)
+        g.nexus_request_id = request_id
+    source_component = extra.pop("source_component", "portal")
+    severity = extra.pop("severity", None)
+    if not isinstance(severity, str) or severity not in SEVERITY_LEVELS:
+        severity = {"ERROR": "high", "DENY": "medium", "BLOCK": "medium", "WARN": "low"}.get(decision, "info")
     record = {
-        "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "ts": datetime.now(timezone.utc).isoformat(timespec="microseconds"),
         "event_type": event_type,
+        "request_id": request_id,
+        "source_component": source_component,
+        "severity": severity,
         "user": user.get("username") or extra.pop("user", "-"),
         "role": user.get("role", "-"),
         "src_ip": request.remote_addr or "-",
@@ -43,9 +154,29 @@ def log_event(event_type: str, decision: str = "INFO", reason: str = "", **extra
         "reason": reason,
     }
     extra.pop("user", None)
+    extra.pop("request_id", None)
     for k, v in extra.items():
+        if _is_sensitive_log_field(k):
+            continue
         record[k] = v if isinstance(v, (int, float, bool)) else str(v)[:200]
     _logger.info(json.dumps(record, ensure_ascii=False))
+    try:
+        from .auth_events import collect_auth_events
+
+        for derived in collect_auth_events(record):
+            derived_type = derived.pop("event_type", "post_lock_retry_detected")
+            log_event(
+                derived_type,
+                derived.pop("decision"),
+                derived.pop("reason"),
+                **derived,
+            )
+    except Exception as exc:  # Aggregation must not change authentication behavior.
+        current_app.logger.error(
+            "auth_event_aggregation_failed event_type=%s error_type=%s",
+            event_type,
+            type(exc).__name__,
+        )
 
 
 # ---- 의심 입력 기록(차단하지 않는다) ----
@@ -57,7 +188,7 @@ SUSPICIOUS = [
     ("traversal", re.compile(r"(?i)(\.\./|\.\.\\|%2e%2e(%2f|/|%5c)|%252e)")),
 ]
 SKIP_FIELDS = {"password", "current_password", "new_password", "confirm_password", "csrf_token"}  # 비밀번호는 보지도 기록하지도 않는다
-NO_VALUE_FIELDS = {"message", "body", "reason"}  # 대화·본문 내용은 로그에 남기지 않고 종류만 남긴다
+NO_VALUE_FIELDS = {"message", "body", "reason", "prompt", "prompt_text", "prompt_raw", "content", "document", "attachment"}  # 내용은 로그에 남기지 않고 종류만 남긴다
 
 
 def scan_inputs():

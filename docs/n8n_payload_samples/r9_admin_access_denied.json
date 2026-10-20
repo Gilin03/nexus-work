@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.1",
+  "action_level": "alert",
+  "rule": {
+    "id": "R9",
+    "stable_name": "ADMIN_PATH_ACCESS_DENIED",
+    "display_name": "[NEXUS][R9] 관리자 권한 접근 거부"
+  },
+  "alert": {
+    "id": "01M592R8CJQFH319KCPEEF3M6F",
+    "event_definition_id": "6ad58c2f9d0f6c101daf82f9",
+    "title": "[NEXUS][R9] 관리자 권한 접근 거부",
+    "timestamp": "2026-10-19T03:19:44.820Z",
+    "priority": 3,
+    "key": "example_user|/admin/users"
+  },
+  "event": {
+    "event_type": "authz_deny",
+    "user": "example_user",
+    "role": "employee",
+    "src_ip": "192.0.2.9",
+    "path": "/admin/users",
+    "decision": "DENY",
+    "reason": "insufficient_role",
+    "required": "admin",
+    "severity": "medium"
+  }
+}

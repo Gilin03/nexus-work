@@ -1,0 +1,948 @@
+{
+  "schema_version": 1,
+  "source_graylog_version": "6.1.16+4a05695",
+  "event_definitions": [
+    {
+      "rule_id": "R1",
+      "stable_name": "ACCOUNT_COMPROMISE",
+      "display_name": "[NEXUS][R1] 계정 침해 의심",
+      "state": "ENABLED",
+      "priority": 3,
+      "alert": true,
+      "description": "같은 user의 300초 내 login_failure 3회 이상 후 성공한 앱 집계 이벤트 또는 기존 account_locked 원본을 탐지한다.",
+      "remediation_steps": "계정 소유자와 최근 인증 이력을 확인하고 잠금/복구 절차를 진행한다.",
+      "config": {
+        "type": "aggregation-v1",
+        "query": "event_type:account_compromise_suspected OR event_type:account_locked",
+        "query_parameters": [],
+        "filters": [],
+        "stream_categories": [],
+        "group_by": [
+          "event_type",
+          "user",
+          "request_id",
+          "src_ip",
+          "decision",
+          "reason",
+          "failed_attempts",
+          "window_seconds"
+        ],
+        "series": [
+          {
+            "type": "count",
+            "id": "count-",
+            "field": null
+          }
+        ],
+        "conditions": {
+          "expression": {
+            "expr": ">",
+            "left": {
+              "expr": "number-ref",
+              "ref": "count-"
+            },
+            "right": {
+              "expr": "number",
+              "value": 0.0
+            }
+          }
+        },
+        "search_within_ms": 15000,
+        "execute_every_ms": 15000,
+        "use_cron_scheduling": false,
+        "cron_expression": null,
+        "cron_timezone": null,
+        "event_limit": 100,
+        "stream_names": [
+          "NEXUS_AUTH"
+        ]
+      },
+      "field_spec": {
+        "decision": {
+          "data_type": "string",
+          "providers": [
+            {
+              "type": "template-v1",
+              "template": "${source.decision}",
+              "require_values": false
+            }
+          ]
+        },
+        "reason": {
+          "data_type": "string",
+          "providers": [
+            {
+              "type": "template-v1",
+              "template": "${source.reason}",
+              "require_values": false
+            }
+          ]
+        },
+        "event_type": {
+          "data_type": "string",
+          "providers": [
+            {
+              "type": "template-v1",
+              "template": "${source.event_type}",
+              "require_values": true
+            }
+          ]
+        },
+        "request_id": {
+          "data_type": "string",
+          "providers": [
+            {
+              "type": "template-v1",
+              "template": "${source.request_id}",
+              "require_values": true
+            }
+          ]
+        },
+        "failed_attempts": {
+          "data_type": "string",
+          "providers": [
+            {
+              "type": "template-v1",
+              "template": "${source.failed_attempts}",
+              "require_values": false
+            }
+          ]
+        },
+        "user": {
+          "data_type": "string",
+          "providers": [
+            {
+              "type": "template-v1",
+              "template": "${source.user}",
+              "require_values": true
+            }
+          ]
+        },
+        "src_ip": {
+          "data_type": "string",
+          "providers": [
+            {
+              "type": "template-v1",
+              "template": "${source.src_ip}",
+              "require_values": false
+            }
+          ]
+        },
+        "window_seconds": {
+          "data_type": "string",
+          "providers": [
+            {
+              "type": "template-v1",
+              "template": "${source.window_seconds}",
+              "require_values": false
+            }
+          ]
+        }
+      },
+      "key_spec": [
+        "event_type",
+        "user",
+        "request_id"
+      ],
+      "notification_settings": {
+        "grace_period_ms": 300000,
+        "backlog_size": 5
+      },
+      "notifications": [],
+      "storage": [
+        {
+          "type": "persist-to-streams-v1",
+          "stream_names": [
+            "All events"
+          ]
+        }
+      ]
+    },
+    {
+      "rule_id": "R2",
+      "stable_name": "DIRECT_PROMPT_INJECTION_BLOCKED",
+      "display_name": "[NEXUS][R2] 직접 Prompt Injection 차단",
+      "state": "ENABLED",
+      "priority": 3,
+      "alert": true,
+      "description": "NEXUS_AI_SECURITY에서 직접 입력 prompt injection 차단 이벤트만 탐지한다. 원문 prompt는 필드에 포함하지 않는다.",
+      "remediation_steps": "요청이 responder 전달 전에 차단됐는지 확인하고 pattern_id와 request_id로 증거를 추적한다.",
+      "config": {
+        "type": "aggregation-v1",
+        "query": "event_type:prompt_injection_detected AND injection_type:direct AND decision:DENY",
+        "query_parameters": [],
+        "filters": [],
+        "stream_categories": [],
+        "group_by": [
+          "event_type",
+          "injection_type",
+          "source_type",
+          "pattern_id",
+          "user",
+          "role",
+          "src_ip",
+          "session_id",
+          "request_id",
+          "decision",
+          "reason",
+          "severity",
+          "source_component"
+        ],
+        "series": [
+          {
+            "type": "count",
+            "id": "count-",
+            "field": null
+          }
+        ],
+        "conditions": {
+          "expression": {
+            "expr": ">",
+            "left": {
+              "expr": "number-ref",
+              "ref": "count-"
+            },
+            "right": {
+              "expr": "number",
+              "value": 0.0
+            }
+          }
+        },
+        "search_within_ms": 15000,
+        "execute_every_ms": 15000,
+        "use_cron_scheduling": false,
+        "cron_expression": null,
+        "cron_timezone": null,
+        "event_limit": 100,
+        "stream_names": [
+          "NEXUS_AI_SECURITY"
+        ]
+      },
+      "field_spec": {
+        "event_type": {
+          "data_type": "string",
+          "providers": [
+            {
+              "type": "template-v1",
+              "template": "${source.event_type}",
+              "require_values": true
+            }
+          ]
+        },
+        "injection_type": {
+          "data_type": "string",
+          "providers": [
+            {
+              "type": "template-v1",
+              "template": "${source.injection_type}",
+              "require_values": false
+            }
+          ]
+        },
+        "source_type": {
+          "data_type": "string",
+          "providers": [
+            {
+              "type": "template-v1",
+              "template": "${source.source_type}",
+              "require_values": false
+            }
+          ]
+        },
+        "pattern_id": {
+          "data_type": "string",
+          "providers": [
+            {
+              "type": "template-v1",
+              "template": "${source.pattern_id}",
+              "require_values": true
+            }
+          ]
+        },
+        "user": {
+          "data_type": "string",
+          "providers": [
+            {
+              "type": "template-v1",
+              "template": "${source.user}",
+              "require_values": true
+            }
+          ]
+        },
+        "role": {
+          "data_type": "string",
+          "providers": [
+            {
+              "type": "template-v1",
+              "template": "${source.role}",
+              "require_values": false
+            }
+          ]
+        },
+        "src_ip": {
+          "data_type": "string",
+          "providers": [
+            {
+              "type": "template-v1",
+              "template": "${source.src_ip}",
+              "require_values": false
+            }
+          ]
+        },
+        "session_id": {
+          "data_type": "string",
+          "providers": [
+            {
+              "type": "template-v1",
+              "template": "${source.session_id}",
+              "require_values": false
+            }
+          ]
+        },
+        "request_id": {
+          "data_type": "string",
+          "providers": [
+            {
+              "type": "template-v1",
+              "template": "${source.request_id}",
+              "require_values": true
+            }
+          ]
+        },
+        "decision": {
+          "data_type": "string",
+          "providers": [
+            {
+              "type": "template-v1",
+              "template": "${source.decision}",
+              "require_values": false
+            }
+          ]
+        },
+        "reason": {
+          "data_type": "string",
+          "providers": [
+            {
+              "type": "template-v1",
+              "template": "${source.reason}",
+              "require_values": false
+            }
+          ]
+        },
+        "severity": {
+          "data_type": "string",
+          "providers": [
+            {
+              "type": "template-v1",
+              "template": "${source.severity}",
+              "require_values": false
+            }
+          ]
+        },
+        "source_component": {
+          "data_type": "string",
+          "providers": [
+            {
+              "type": "template-v1",
+              "template": "${source.source_component}",
+              "require_values": false
+            }
+          ]
+        }
+      },
+      "key_spec": [
+        "event_type",
+        "user",
+        "request_id"
+      ],
+      "notification_settings": {
+        "grace_period_ms": 300000,
+        "backlog_size": 5
+      },
+      "notifications": [],
+      "storage": [
+        {
+          "type": "persist-to-streams-v1",
+          "stream_names": [
+            "All events"
+          ]
+        }
+      ]
+    },
+    {
+      "rule_id": "R5",
+      "stable_name": "ACCOUNT_SPRAY",
+      "display_name": "[NEXUS][R5] 계정 스프레이",
+      "state": "ENABLED",
+      "priority": 3,
+      "alert": true,
+      "description": "같은 src_ip에서 5분 내 서로 다른 계정의 login_failure 5개 이상 탐지",
+      "remediation_steps": "",
+      "config": {
+        "type": "aggregation-v1",
+        "query": "event_type:login_failure AND user:* AND NOT user:\"-\"",
+        "query_parameters": [],
+        "filters": [],
+        "stream_categories": [],
+        "group_by": [
+          "src_ip"
+        ],
+        "series": [
+          {
+            "type": "card",
+            "id": "distinct_users",
+            "field": "user"
+          }
+        ],
+        "conditions": {
+          "expression": {
+            "expr": ">",
+            "left": {
+              "expr": "number-ref",
+              "ref": "distinct_users"
+            },
+            "right": {
+              "expr": "number",
+              "value": 4.0
+            }
+          }
+        },
+        "search_within_ms": 300000,
+        "execute_every_ms": 60000,
+        "use_cron_scheduling": false,
+        "cron_expression": null,
+        "cron_timezone": null,
+        "event_limit": 100,
+        "stream_names": [
+          "NEXUS_AUTH"
+        ]
+      },
+      "field_spec": {
+        "src_ip": {
+          "data_type": "string",
+          "providers": [
+            {
+              "type": "template-v1",
+              "template": "${source.src_ip}",
+              "require_values": false
+            }
+          ]
+        }
+      },
+      "key_spec": [
+        "src_ip"
+      ],
+      "notification_settings": {
+        "grace_period_ms": 300000,
+        "backlog_size": 5
+      },
+      "notifications": [],
+      "storage": [
+        {
+          "type": "persist-to-streams-v1",
+          "stream_names": [
+            "All events"
+          ]
+        }
+      ]
+    },
+    {
+      "rule_id": "R6",
+      "stable_name": "POST_LOCK_RETRY",
+      "display_name": "[NEXUS][R6] 잠금 후 로그인 재시도",
+      "state": "ENABLED",
+      "priority": 3,
+      "alert": true,
+      "description": "account_locked 이후 같은 user/src_ip에서 300초 내 다른 request_id의 후속 로그인 재시도가 3회 발생한 앱 집계 이벤트를 탐지한다.",
+      "remediation_steps": "잠금 요청 ID와 후속 시도 3회를 확인하고 계정 소유자와 출발지 IP를 조사한다.",
+      "config": {
+        "type": "aggregation-v1",
+        "query": "event_type:post_lock_retry_detected",
+        "query_parameters": [],
+        "filters": [],
+        "stream_categories": [],
+        "group_by": [
+          "lock_request_id",
+          "user",
+          "src_ip",
+          "trigger_event_type",
+          "count",
+          "window_seconds"
+        ],
+        "series": [
+          {
+            "type": "count",
+            "id": "count-",
+            "field": null
+          }
+        ],
+        "conditions": {
+          "expression": {
+            "expr": ">",
+            "left": {
+              "expr": "number-ref",
+              "ref": "count-"
+            },
+            "right": {
+              "expr": "number",
+              "value": 0.0
+            }
+          }
+        },
+        "search_within_ms": 15000,
+        "execute_every_ms": 15000,
+        "use_cron_scheduling": false,
+        "cron_expression": null,
+        "cron_timezone": null,
+        "event_limit": 100,
+        "stream_names": [
+          "NEXUS_AUTH"
+        ]
+      },
+      "field_spec": {
+        "lock_request_id": {
+          "data_type": "string",
+          "providers": [
+            {
+              "type": "template-v1",
+              "template": "${source.lock_request_id}",
+              "require_values": true
+            }
+          ]
+        },
+        "count": {
+          "data_type": "string",
+          "providers": [
+            {
+              "type": "template-v1",
+              "template": "${source.count}",
+              "require_values": false
+            }
+          ]
+        },
+        "user": {
+          "data_type": "string",
+          "providers": [
+            {
+              "type": "template-v1",
+              "template": "${source.user}",
+              "require_values": false
+            }
+          ]
+        },
+        "src_ip": {
+          "data_type": "string",
+          "providers": [
+            {
+              "type": "template-v1",
+              "template": "${source.src_ip}",
+              "require_values": false
+            }
+          ]
+        },
+        "trigger_event_type": {
+          "data_type": "string",
+          "providers": [
+            {
+              "type": "template-v1",
+              "template": "${source.trigger_event_type}",
+              "require_values": false
+            }
+          ]
+        },
+        "window_seconds": {
+          "data_type": "string",
+          "providers": [
+            {
+              "type": "template-v1",
+              "template": "${source.window_seconds}",
+              "require_values": false
+            }
+          ]
+        }
+      },
+      "key_spec": [
+        "lock_request_id"
+      ],
+      "notification_settings": {
+        "grace_period_ms": 300000,
+        "backlog_size": 5
+      },
+      "notifications": [],
+      "storage": [
+        {
+          "type": "persist-to-streams-v1",
+          "stream_names": [
+            "All events"
+          ]
+        }
+      ]
+    },
+    {
+      "rule_id": "R7",
+      "stable_name": "OFF_HOURS_LOGIN_SUCCESS",
+      "display_name": "[NEXUS][R7] 심야 로그인 성공",
+      "state": "ENABLED",
+      "priority": 1,
+      "alert": true,
+      "description": "KST 00:00 이상 05:00 미만의 login_success를 하루 1회 탐지합니다.",
+      "remediation_steps": "",
+      "config": {
+        "type": "aggregation-v1",
+        "query": "event_type:login_success AND timestamp:[now+9h/d-9h TO now+9h/d-4h}",
+        "query_parameters": [],
+        "filters": [],
+        "stream_categories": [],
+        "group_by": [
+          "user",
+          "src_ip"
+        ],
+        "series": [
+          {
+            "type": "count",
+            "id": "count-",
+            "field": null
+          }
+        ],
+        "conditions": {
+          "expression": {
+            "expr": ">",
+            "left": {
+              "expr": "number-ref",
+              "ref": "count-"
+            },
+            "right": {
+              "expr": "number",
+              "value": 0.0
+            }
+          }
+        },
+        "search_within_ms": 21600000,
+        "execute_every_ms": 300000,
+        "use_cron_scheduling": true,
+        "cron_expression": "0 5 5 ? * *",
+        "cron_timezone": "Asia/Seoul",
+        "event_limit": 100,
+        "stream_names": [
+          "NEXUS_AUTH"
+        ]
+      },
+      "field_spec": {
+        "user": {
+          "data_type": "string",
+          "providers": [
+            {
+              "type": "template-v1",
+              "template": "${source.user}",
+              "require_values": false
+            }
+          ]
+        },
+        "src_ip": {
+          "data_type": "string",
+          "providers": [
+            {
+              "type": "template-v1",
+              "template": "${source.src_ip}",
+              "require_values": false
+            }
+          ]
+        }
+      },
+      "key_spec": [
+        "user",
+        "src_ip"
+      ],
+      "notification_settings": {
+        "grace_period_ms": 0,
+        "backlog_size": 5
+      },
+      "notifications": [],
+      "storage": [
+        {
+          "type": "persist-to-streams-v1",
+          "stream_names": [
+            "All events"
+          ]
+        }
+      ]
+    },
+    {
+      "rule_id": "R8",
+      "stable_name": "NOT_FOUND_SCAN",
+      "display_name": "[NEXUS][R8] 404 경로 스캔",
+      "state": "ENABLED",
+      "priority": 3,
+      "alert": true,
+      "description": "같은 src_ip에서 60초 내 not_found 30회 이상 탐지",
+      "remediation_steps": "",
+      "config": {
+        "type": "aggregation-v1",
+        "query": "event_type:not_found",
+        "query_parameters": [],
+        "filters": [],
+        "stream_categories": [],
+        "group_by": [
+          "src_ip"
+        ],
+        "series": [
+          {
+            "type": "count",
+            "id": "count-",
+            "field": null
+          }
+        ],
+        "conditions": {
+          "expression": {
+            "expr": ">",
+            "left": {
+              "expr": "number-ref",
+              "ref": "count-"
+            },
+            "right": {
+              "expr": "number",
+              "value": 29.0
+            }
+          }
+        },
+        "search_within_ms": 60000,
+        "execute_every_ms": 60000,
+        "use_cron_scheduling": false,
+        "cron_expression": null,
+        "cron_timezone": null,
+        "event_limit": 100,
+        "stream_names": [
+          "NEXUS_WEB"
+        ]
+      },
+      "field_spec": {
+        "src_ip": {
+          "data_type": "string",
+          "providers": [
+            {
+              "type": "template-v1",
+              "template": "${source.src_ip}",
+              "require_values": false
+            }
+          ]
+        },
+        "path": {
+          "data_type": "string",
+          "providers": [
+            {
+              "type": "template-v1",
+              "template": "${source.path}",
+              "require_values": false
+            }
+          ]
+        }
+      },
+      "key_spec": [
+        "src_ip"
+      ],
+      "notification_settings": {
+        "grace_period_ms": 60000,
+        "backlog_size": 5
+      },
+      "notifications": [],
+      "storage": [
+        {
+          "type": "persist-to-streams-v1",
+          "stream_names": [
+            "All events"
+          ]
+        }
+      ]
+    },
+    {
+      "rule_id": "R9",
+      "stable_name": "ADMIN_PATH_ACCESS_DENIED",
+      "display_name": "[NEXUS][R9] 관리자 권한 접근 거부",
+      "state": "ENABLED",
+      "priority": 3,
+      "alert": true,
+      "description": "event_type=authz_deny AND role=employee/non-admin AND reason=insufficient_role AND required=admin. path is investigation evidence only.",
+      "remediation_steps": "관리자 권한 거부 이벤트를 확인하고 요청자와 경로를 조사한다.",
+      "config": {
+        "type": "aggregation-v1",
+        "query": "event_type:authz_deny AND (role:employee OR role:manager) AND reason:insufficient_role AND required:admin",
+        "query_parameters": [],
+        "filters": [],
+        "stream_categories": [],
+        "group_by": [
+          "user",
+          "path"
+        ],
+        "series": [
+          {
+            "type": "count",
+            "id": "count-",
+            "field": null
+          }
+        ],
+        "conditions": {
+          "expression": {
+            "expr": ">",
+            "left": {
+              "expr": "number-ref",
+              "ref": "count-"
+            },
+            "right": {
+              "expr": "number",
+              "value": 0.0
+            }
+          }
+        },
+        "search_within_ms": 15000,
+        "execute_every_ms": 15000,
+        "use_cron_scheduling": false,
+        "cron_expression": null,
+        "cron_timezone": null,
+        "event_limit": 100,
+        "stream_names": [
+          "NEXUS_WEB"
+        ]
+      },
+      "field_spec": {
+        "user": {
+          "data_type": "string",
+          "providers": [
+            {
+              "type": "template-v1",
+              "template": "${source.user}",
+              "require_values": false
+            }
+          ]
+        },
+        "path": {
+          "data_type": "string",
+          "providers": [
+            {
+              "type": "template-v1",
+              "template": "${source.path}",
+              "require_values": false
+            }
+          ]
+        }
+      },
+      "key_spec": [
+        "user",
+        "path"
+      ],
+      "notification_settings": {
+        "grace_period_ms": 15000,
+        "backlog_size": 5
+      },
+      "notifications": [],
+      "storage": [
+        {
+          "type": "persist-to-streams-v1",
+          "stream_names": [
+            "All events"
+          ]
+        }
+      ]
+    },
+    {
+      "rule_id": "R10",
+      "stable_name": "DIRECT_CONFIDENTIAL_ACCESS_DENIED",
+      "display_name": "[NEXUS][R10] 기밀 문서 직접 접근 거부",
+      "state": "ENABLED",
+      "priority": 3,
+      "alert": true,
+      "description": "Employee authz_deny: (insufficient_role with required manager/admin and confidential/finance path) OR (out_of_scope with payroll resource).",
+      "remediation_steps": "기밀 경로 또는 급여 자원 접근 거부를 권한 및 대상 범위와 함께 확인한다.",
+      "config": {
+        "type": "aggregation-v1",
+        "query": "event_type:authz_deny AND role:employee AND ((reason:insufficient_role AND required:\"manager,admin\" AND (path:\\/confidential\\/* OR path:\\/finance\\/*)) OR (reason:out_of_scope AND resource:payroll\\:*))",
+        "query_parameters": [],
+        "filters": [],
+        "stream_categories": [],
+        "group_by": [
+          "user",
+          "path",
+          "resource"
+        ],
+        "series": [
+          {
+            "type": "count",
+            "id": "count-",
+            "field": null
+          }
+        ],
+        "conditions": {
+          "expression": {
+            "expr": ">",
+            "left": {
+              "expr": "number-ref",
+              "ref": "count-"
+            },
+            "right": {
+              "expr": "number",
+              "value": 0.0
+            }
+          }
+        },
+        "search_within_ms": 15000,
+        "execute_every_ms": 15000,
+        "use_cron_scheduling": false,
+        "cron_expression": null,
+        "cron_timezone": null,
+        "event_limit": 100,
+        "stream_names": [
+          "NEXUS_WEB"
+        ]
+      },
+      "field_spec": {
+        "user": {
+          "data_type": "string",
+          "providers": [
+            {
+              "type": "template-v1",
+              "template": "${source.user}",
+              "require_values": false
+            }
+          ]
+        },
+        "path": {
+          "data_type": "string",
+          "providers": [
+            {
+              "type": "template-v1",
+              "template": "${source.path}",
+              "require_values": false
+            }
+          ]
+        },
+        "resource": {
+          "data_type": "string",
+          "providers": [
+            {
+              "type": "template-v1",
+              "template": "${source.resource}",
+              "require_values": false
+            }
+          ]
+        }
+      },
+      "key_spec": [
+        "user",
+        "path",
+        "resource"
+      ],
+      "notification_settings": {
+        "grace_period_ms": 15000,
+        "backlog_size": 5
+      },
+      "notifications": [],
+      "storage": [
+        {
+          "type": "persist-to-streams-v1",
+          "stream_names": [
+            "All events"
+          ]
+        }
+      ]
+    }
+  ]
+}

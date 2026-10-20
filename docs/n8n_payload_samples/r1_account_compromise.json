@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.1",
+  "action_level": "contain",
+  "rule": {
+    "id": "R1",
+    "stable_name": "ACCOUNT_COMPROMISE",
+    "display_name": "[NEXUS][R1] 계정 침해 의심"
+  },
+  "alert": {
+    "id": "01M59BBT2EHSY1VBST5MAM0H97",
+    "event_definition_id": "6ad5ac319d0f6c101dafd65b",
+    "title": "[NEXUS][R1] 계정 침해 의심",
+    "timestamp": "2026-10-19T05:50:15.614Z",
+    "priority": 4,
+    "key": "account_compromise_suspected|example_user|4861e75cab5a6fbd4fc215fd15a1a727"
+  },
+  "event": {
+    "event_type": "account_compromise_suspected",
+    "user": "example_user",
+    "source_component": "portal",
+    "role": "employee",
+    "src_ip": "192.0.2.11",
+    "request_id": "4861e75cab5a6fbd4fc215fd15a1a727",
+    "failed_attempts": 3,
+    "window_seconds": 300,
+    "decision": "WARN",
+    "reason": "login_success_after_failures",
+    "severity": "high"
+  }
+}
