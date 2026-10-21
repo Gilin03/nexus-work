@@ -96,8 +96,9 @@ def test_rejects_wrong_type_or_content(aapp, root, events, filename, data, reaso
 def test_empty_and_oversized_uploads_are_rejected(aapp, root):
     c = as_user(aapp, "zz_emp")
     assert c.post("/account/photo", data={"csrf_token": csrf_of(c)}, content_type="multipart/form-data").status_code == 400
-    assert upload(c, "큰.png", PNG + b"\x00" * (2 * 1024 * 1024 + 10)).status_code == 413
+    assert upload(c, "큰.png", PNG + b"\x00" * (10 * 1024 * 1024 + 100 * 1024)).status_code == 413
     assert sql(root, "SELECT COUNT(*) FROM profile_photos")[0][0] == 0
+    assert upload(c, "중간.png", PNG + b"\x00" * (9 * 1024 * 1024)).status_code == 303      # 예전 상한(2MB)보다 크지만 10MB 안쪽은 된다
 
 
 def test_upload_requires_csrf(aapp, root):

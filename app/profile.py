@@ -1,5 +1,5 @@
 """프로필 사진: 사용자가 자기 사진을 올리고 바꾸고 지운다.
-- 허용 형식은 png·jpg 뿐이고 확장자와 내용(매직바이트)이 모두 맞아야 한다(uploads.inspect_upload). 크기 상한은 앱 전체 업로드 상한(2MB)이다.
+- 허용 형식은 png·jpg 뿐이고 확장자와 내용(매직바이트)이 모두 맞아야 한다(uploads.inspect_upload). 크기 상한은 10MB 이다(security.ENDPOINT_LIMITS, 메신저와 같다).
 - 파일은 웹루트 밖 업로드 폴더의 avatars/ 에 무작위 이름으로 둔다. 사용자당 한 장이며 바꾸면 이전 파일을 지운다.
 - 사진은 요청자가 자기 것만 올리고 지울 수 있다(대상은 항상 g.user). 보는 것은 로그인한 모두에게 열려 있다(상단바·목록용).
 - 내려줄 때는 이미지로만 열리게 한다: 형식은 DB 에 저장한 값, nosniff, 아무것도 불러오지 못하는 CSP(+sandbox), 같은 출처만 허용."""
@@ -42,7 +42,7 @@ def photo_upload():
     upload = request.files.get("photo")
     if not upload or not upload.filename:
         return _form(error=PHOTO_MESSAGES["empty_upload"], status=400)
-    data = upload.read()
+    data = upload.read()                                  # 본문 상한(security.ENDPOINT_LIMITS)을 넘으면 그 전에 413 이 난다
     try:
         ext, mime, _display, digest = uploads.inspect_upload(upload.filename, data)
         if ext not in PHOTO_EXTS:

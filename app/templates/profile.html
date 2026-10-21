@@ -13,7 +13,7 @@
   </div>
   <form method="post" action="{{ url_for('profile.photo_upload') }}" enctype="multipart/form-data">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <label>사진 선택 (png, jpg · 2MB 이하)
+    <label>사진 선택 (png, jpg · 10MB 이하)
       <input type="file" name="photo" id="photo" accept=".png,.jpg" required>
     </label>
     <div id="photo-preview" class="attach-preview" hidden></div>

@@ -10,7 +10,7 @@
     box.hidden = true;
     var f = input.files && input.files[0];
     if (!f) { return; }
-    if (f.size > 2 * 1024 * 1024) { window.alert("2MB 이하만 올릴 수 있습니다."); input.value = ""; return; }
+    if (f.size > 10 * 1024 * 1024) { window.alert("10MB 이하만 올릴 수 있습니다."); input.value = ""; return; }
     if (f.type !== "image/png" && f.type !== "image/jpeg") { return; }
     var reader = new FileReader();
     reader.onload = function () {

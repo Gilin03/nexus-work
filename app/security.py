@@ -362,6 +362,7 @@ def add_headers(resp):
     resp.headers.setdefault("Content-Security-Policy", (
         "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
         "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+                   "profile.photo_upload": 10 * 1024 * 1024 + 64 * 1024,                 # 웹 프로필 사진도 같은 10MB
     ))
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["X-Frame-Options"] = "DENY"
