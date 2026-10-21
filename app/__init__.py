@@ -57,6 +57,7 @@ def create_app(overrides=None):
     app.jinja_env.filters["won"] = lambda n: f"{int(n):,}원"
     app.jinja_env.filters["hangul_won"] = formats.won_hangul
     app.jinja_env.filters["status_label"] = lambda s: STATUS_LABEL.get(s, s)
+    app.before_request(security.check_ip_block)
     app.before_request(security.apply_upload_limit)  # 본문을 읽기 전에(CSRF 검사가 폼을 읽는다) 첨부 요청의 상한을 푼다
     app.before_request(auth.load_user)  # CSRF 실패 로그에도 사용자명이 남도록 먼저 실행(세션 쿠키가 있을 때만 DB 조회)
     app.before_request(security.scan_inputs)  # CSRF 로 막히는 요청의 의심 입력도 기록되도록 먼저 실행

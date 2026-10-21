@@ -13,7 +13,7 @@ import os
 
 from flask import Blueprint, jsonify, request
 
-from .security import ip_rate_limited, log_event
+from .security import get_client_ip, ip_rate_limited, log_event
 
 bp = Blueprint("internal_api", __name__, url_prefix="/internal/api/v1")
 
@@ -42,7 +42,7 @@ def internal_api(path, token, via, conversation_id=0):
 
 @bp.get("/flag")
 def flag():
-    if ip_rate_limited(f"internal_api:{request.remote_addr}", RATE_LIMIT):
+    if ip_rate_limited(f"internal_api:{get_client_ip()}", RATE_LIMIT):
         log_event("rate_limited", "BLOCK", "internal_api_limit", via="direct")
         return jsonify(ok=False, error="rate_limited"), 429
     header = request.headers.get("Authorization", "")

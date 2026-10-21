@@ -42,6 +42,7 @@
     ('관리 현황', url_for('admin.overview'), ep == 'admin.overview', g.user.role == 'admin'),
     ('사용자 관리', url_for('admin.users'), ep in ('admin.users', 'admin.user_new', 'admin.change_role', 'admin.unlock', 'admin.lock', 'admin.reset_password'), g.user.role == 'admin'),
     ('보안 대시보드', url_for('admin.audit_log'), ep.startswith('admin.audit'), can('security.dashboard')),
+    ('차단 IP 관리', url_for('admin.list_blocked_ips'), ep.startswith('admin.list_blocked_ips'), can('security.dashboard')),
     ('권한 현황', url_for('admin.permissions'), ep == 'admin.permissions', g.user.role == 'admin')]),
 ] %}
 {# 현재 위치(브레드크럼)는 엔드포인트 접두어로 정한다: (접두어, 그룹, 이름). 글·첨부 화면은 게시판으로 본다 #}

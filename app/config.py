@@ -44,6 +44,10 @@ class Config:
         # 메신저 자동 업데이트로 내줄 설치 파일(같은 폴더에 서명 파일 <이름>.sig 가 있어야 내준다). 기본은 저장소 옆(바탕화면)
         self.MESSENGER_SETUP_PATH = Path(os.environ.get("MESSENGER_SETUP_PATH", BASE_DIR.parent / "NEXUS_Messenger_Setup.exe"))
 
+        # 신뢰할 수 있는 프록시 (pfSense, 루프백) - X-Forwarded-For 허용 대상
+        trusted_raw = os.environ.get("TRUSTED_PROXIES", "127.0.0.1,192.168.3.10")
+        self.TRUSTED_PROXIES = {ip.strip() for ip in trusted_raw.split(",") if ip.strip()}
+
         # 로그인 방어
         self.LOGIN_MAX_FAILURES = 5
         self.LOGIN_LOCK_MINUTES = 15

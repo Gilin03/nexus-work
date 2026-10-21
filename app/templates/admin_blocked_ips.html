@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}차단 IP 관리 · NEXUS WORK{% endblock %}
+{% block content %}
+<h1>차단 IP 관리</h1>
+<p class="hint">비인가 접근, 무차별 대입, 악성 공격 시도로 인해 차단된 IP 목록입니다. n8n 자동 관제 워크플로 또는 관리자가 직접 등록/해제할 수 있습니다. 차단된 IP는 포털 접근 시 즉시 403 차단됩니다.</p>
+
+<div class="sheet">
+  <h2>IP 수동 차단 등록</h2>
+  <form method="post" action="{{ url_for('admin.add_blocked_ip') }}" class="grid-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-row">
+      <label for="ip_address">IP 주소</label>
+      <input type="text" id="ip_address" name="ip_address" placeholder="예: 192.168.3.100" required maxlength="45">
+    </div>
+    <div class="form-row">
+      <label for="reason">차단 사유</label>
+      <input type="text" id="reason" name="reason" placeholder="예: 무차별 대입 공격 의심" maxlength="100">
+    </div>
+    <div class="form-row">
+      <label for="minutes">차단 기간(분)</label>
+      <select id="minutes" name="minutes">
+        <option value="15">15분</option>
+        <option value="30" selected>30분</option>
+        <option value="60">1시간</option>
+        <option value="1440">1일 (24시간)</option>
+        <option value="10080">7일</option>
+      </select>
+    </div>
+    <div class="form-row">
+      <button type="submit" class="btn primary">IP 차단하기</button>
+    </div>
+  </form>
+</div>
+
+<div class="sheet">
+  <h2>차단 내역 목록 (최근 100건)</h2>
+  <div class="scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>IP 주소</th>
+          <th>사유</th>
+          <th>차단 상태</th>
+          <th>만료 예정 시각</th>
+          <th>등록자</th>
+          <th>등록 시각</th>
+          <th>관리</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for row in rows %}
+        <tr>
+          <td><strong>{{ row.ip_address }}</strong></td>
+          <td>{{ row.reason }}</td>
+          <td>
+            {% if row.is_active %}
+              <span class="badge danger" style="color: #d9534f; font-weight: bold;">[차단 중]</span>
+            {% else %}
+              <span class="badge muted" style="color: #777;">[만료됨]</span>
+            {% endif %}
+          </td>
+          <td>{{ row.blocked_until }}</td>
+          <td>{{ row.created_by }}</td>
+          <td>{{ row.created_at }}</td>
+          <td>
+            <form method="post" action="{{ url_for('admin.remove_blocked_ip', ip=row.ip_address) }}" class="inline" onsubmit="return confirm('이 IP의 차단을 즉시 해제하시겠습니까?');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button type="submit" class="btn small danger">차단 해제</button>
+            </form>
+          </td>
+        </tr>
+      {% else %}
+        <tr>
+          <td colspan="7" style="text-align: center; color: #888;">현재 차단된 IP가 없습니다.</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

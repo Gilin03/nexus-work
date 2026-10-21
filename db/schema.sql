@@ -504,3 +504,14 @@ CREATE TABLE messenger_messages (
   FOREIGN KEY (conversation_id) REFERENCES conversations(id),
   FOREIGN KEY (sender_id) REFERENCES users(id)
 ) ENGINE=InnoDB;
+
+
+CREATE TABLE IF NOT EXISTS blocked_ips (
+  id            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  ip_address    VARCHAR(45)  NOT NULL UNIQUE,
+  reason        VARCHAR(100) NOT NULL DEFAULT 'auto_block',
+  blocked_until DATETIME     NOT NULL,
+  created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  created_by    VARCHAR(50)  NOT NULL DEFAULT 'system',
+  INDEX idx_ip_lookup (ip_address, blocked_until)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

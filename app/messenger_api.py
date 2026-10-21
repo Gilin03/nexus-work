@@ -17,7 +17,7 @@ from flask import Blueprint, current_app, g, jsonify, request
 
 from . import auth, db, uploads, validators
 from .realtime import broadcast_message, join_new_conversation
-from .security import ip_rate_limited, log_event
+from .security import get_client_ip, ip_rate_limited, log_event
 
 bp = Blueprint("messenger_api", __name__, url_prefix="/api/v1")
 
@@ -77,7 +77,7 @@ def _is_member(conversation_id, user_id):
 @bp.post("/login")
 def api_login():
     cfg = current_app.config
-    if ip_rate_limited(f"login:{request.remote_addr}", cfg["LOGIN_IP_LIMIT"]):
+    if ip_rate_limited(f"login:{get_client_ip()}", cfg["LOGIN_IP_LIMIT"]):
         log_event("rate_limited", "BLOCK", "login_ip_limit")
         return _err("rate_limited", "요청이 너무 많습니다. 잠시 후 다시 시도하세요.", 429)
 

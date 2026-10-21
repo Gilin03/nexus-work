@@ -514,3 +514,35 @@ def permissions():
     pinned = db.query_all("SELECT username, display_name, dept FROM users WHERE pinned = 1 ORDER BY dept, username LIMIT 100")
     return render_template("admin_permissions.html", rows=PERMISSIONS, counts=counts, ranks=RANKS, rank_counts=ranks,
                            rank_matrix=matrix(), pinned=pinned, security_team=SECURITY_TEAM)
+
+
+@bp.get("/blocked-ips")
+def list_blocked_ips():
+    rows = db.query_all(
+        "SELECT id, ip_address, reason, blocked_until, created_at, created_by, "
+        "CASE WHEN blocked_until > NOW() THEN 1 ELSE 0 END AS is_active "
+        "FROM blocked_ips ORDER BY blocked_until DESC LIMIT 100"
+    )
+    return render_template("admin_blocked_ips.html", rows=rows)
+
+
+@bp.post("/blocked-ips")
+def add_blocked_ip():
+    ip = request.form.get("ip_address", "").strip()
+    reason = request.form.get("reason", "manual_block").strip()[:100]
+    try:
+        minutes = int(request.form.get("minutes", "30"))
+    except ValueError:
+        minutes = 30
+    if not ip or ip in ("127.0.0.1", "::1"):
+        return redirect(url_for("admin.list_blocked_ips"), 303)
+    security.block_ip(ip, reason=reason, minutes=minutes, created_by=g.user.get("username", "admin"))
+    security.log_event("admin_action", "ALLOW", "block_ip", action="block_ip", target=ip, reason=reason, minutes=minutes)
+    return redirect(url_for("admin.list_blocked_ips"), 303)
+
+
+@bp.post("/blocked-ips/<path:ip>/unblock")
+def remove_blocked_ip(ip):
+    security.unblock_ip(ip)
+    security.log_event("admin_action", "ALLOW", "unblock_ip", action="unblock_ip", target=ip)
+    return redirect(url_for("admin.list_blocked_ips"), 303)

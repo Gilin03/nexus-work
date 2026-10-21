@@ -176,3 +176,15 @@ def test_traversal_in_the_url_path_is_flagged(client, events):
 def test_requests_blocked_by_csrf_are_still_flagged(app, client, events):
     assert client.post("/login", data={"username": "' OR 1=1--", "password": "x"}).status_code == 403
     assert any(e["kind"] == "sqli" and e["field"] == "username" for e in _suspicious(events))
+
+
+def test_get_client_ip_with_trusted_proxy_and_forwarded_for(app):
+    with app.test_request_context("/", environ_base={"REMOTE_ADDR": "192.168.3.10"}, headers={"X-Forwarded-For": "192.168.3.15, 192.168.3.10"}):
+        from app.security import get_client_ip
+        assert get_client_ip() == "192.168.3.15"
+
+
+def test_get_client_ip_ignores_forwarded_for_from_untrusted_ip(app):
+    with app.test_request_context("/", environ_base={"REMOTE_ADDR": "192.168.3.99"}, headers={"X-Forwarded-For": "10.0.0.1"}):
+        from app.security import get_client_ip
+        assert get_client_ip() == "192.168.3.99"

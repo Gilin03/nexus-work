@@ -1,7 +1,7 @@
-﻿<#
+<#
 n8n 장비만 포털 DB 포트(3307)에 닿게 하는 Windows 방화벽 차단 규칙. **관리자 PowerShell** 에서 실행한다. 여러 번 실행해도 된다(이전 규칙을 지우고 다시 만든다).
 
-  powershell -ExecutionPolicy Bypass -File scripts\n8n_db_firewall.ps1 -AllowIp 192.168.7.77
+  powershell -ExecutionPolicy Bypass -File scripts\n8n_db_firewall.ps1 -AllowIp 192.168.3.15
   powershell -ExecutionPolicy Bypass -File scripts\n8n_db_firewall.ps1 -Remove        # 규칙 제거(포트를 다시 닫을 때는 .env 의 DB_BIND 도 127.0.0.1 로)
 
 왜 '허용'이 아니라 '차단'인가: Docker Desktop 이 설치될 때 com.docker.backend.exe 에 "모든 원격 주소 허용" 규칙을 만든다.
@@ -10,7 +10,7 @@ Windows 방화벽은 허용 규칙끼리는 하나만 맞아도 통과시키므�
 MySQL 계정 쪽에서는 Docker 의 주소 변환 때문에 실제 출발지 IP 를 볼 수 없으므로, 장비 제한은 이 규칙이 유일한 수단이다.
 #>
 param(
-    [string]$AllowIp = "192.168.7.77",
+    [string]$AllowIp = "192.168.3.15",
     [int]$Port = 3307,
     [switch]$Remove
 )

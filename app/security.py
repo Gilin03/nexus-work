@@ -11,7 +11,7 @@ from collections import defaultdict, deque
 from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 
-from flask import abort, current_app, g, request, session
+from flask import abort, current_app, g, jsonify, render_template, request, session
 
 _logger = logging.getLogger("nexus.security")
 _logger.propagate = False
@@ -32,6 +32,106 @@ SENSITIVE_LOG_FIELDS = {
 }
 SEVERITY_LEVELS = {"critical": 2, "high": 3, "medium": 4, "low": 5, "info": 6}
 
+
+def get_client_ip() -> str:
+    """클라이언트 실제 IP 확인.
+    
+    신뢰할 수 있는 프록시(기본: 127.0.0.1, 192.168.3.10 pfSense)를 거쳐 온 경우에만
+    X-Forwarded-For 헤더의 최초 클라이언트 IP를 채택하고, 그 외에는 소켓 연결 IP(remote_addr)를 반환한다.
+    """
+    remote = request.remote_addr or "-"
+    trusted = {"127.0.0.1", "192.168.3.10", "::1"}
+    if current_app:
+        trusted = current_app.config.get("TRUSTED_PROXIES", trusted)
+
+    if remote in trusted:
+        forwarded_for = request.headers.get("X-Forwarded-For", "").strip()
+        if forwarded_for:
+            first_ip = forwarded_for.split(",")[0].strip()
+            if first_ip:
+                return first_ip
+    return remote
+
+
+
+_blocked_ip_cache = {}  # {ip: (blocked: bool, reason: str, expire_at: float)}
+_CACHE_TTL = 3.0  # 초 단위 캐시
+
+
+def is_ip_blocked(ip: str) -> tuple[bool, str]:
+    """해당 IP가 차단되어 있는지 확인 (만료 시간 검사 및 3초 캐시 적용)."""
+    if not ip or ip in ("127.0.0.1", "::1", "-"):
+        return False, ""
+
+    now_ts = time.time()
+    cached = _blocked_ip_cache.get(ip)
+    if cached and cached[2] > now_ts:
+        return cached[0], cached[1]
+
+    try:
+        from . import db
+        row = db.query_one(
+            "SELECT reason, blocked_until FROM blocked_ips WHERE ip_address = %s AND blocked_until > NOW()",
+            (ip,)
+        )
+        if row:
+            _blocked_ip_cache[ip] = (True, row["reason"], now_ts + _CACHE_TTL)
+            return True, row["reason"]
+        else:
+            _blocked_ip_cache[ip] = (False, "", now_ts + _CACHE_TTL)
+            return False, ""
+    except Exception:
+        return False, ""
+
+
+def block_ip(ip: str, reason: str = "manual_block", minutes: int = 30, created_by: str = "system") -> bool:
+    """IP 차단 등록 (이미 있으면 차단 시간 연장)."""
+    if not ip or ip in ("127.0.0.1", "::1"):
+        return False
+    try:
+        from . import db
+        db.execute(
+            """
+            INSERT INTO blocked_ips (ip_address, reason, blocked_until, created_by)
+            VALUES (%s, %s, DATE_ADD(NOW(), INTERVAL %s MINUTE), %s)
+            ON DUPLICATE KEY UPDATE
+                reason = VALUES(reason),
+                blocked_until = VALUES(blocked_until),
+                created_by = VALUES(created_by)
+            """,
+            (ip, reason, minutes, created_by)
+        )
+        db.commit()
+        _blocked_ip_cache.pop(ip, None)
+        return True
+    except Exception:
+        return False
+
+
+def unblock_ip(ip: str) -> bool:
+    """IP 차단 해제."""
+    try:
+        from . import db
+        db.execute("DELETE FROM blocked_ips WHERE ip_address = %s", (ip,))
+        db.commit()
+        _blocked_ip_cache.pop(ip, None)
+        return True
+    except Exception:
+        return False
+
+
+def check_ip_block():
+    """모든 HTTP 요청 전 IP 차단 여부 검사 (before_request 훅)."""
+    if request.path.startswith("/static/") or request.path == "/healthz":
+        return None
+    client_ip = get_client_ip()
+    blocked, reason = is_ip_blocked(client_ip)
+    if blocked:
+        log_event("ip_blocked", "BLOCK", reason, src_ip=client_ip, target="ip_block")
+        if request.path.startswith(("/api/", "/internal/api/")):
+            return jsonify(ok=False, error="ip_blocked", message="보안 정책에 의해 접근이 차단된 IP입니다."), 403
+        return render_template("error.html", code=403, message="보안 정책에 의해 접근이 차단된 IP입니다."), 403
+    return None
 
 def _is_sensitive_log_field(name, value=None):
     normalized = str(name).lower()
@@ -152,7 +252,7 @@ def log_event(event_type: str, decision: str = "INFO", reason: str = "", **extra
         "severity": severity,
         "user": user.get("username") or extra.pop("user", "-"),
         "role": user.get("role", "-"),
-        "src_ip": request.remote_addr or "-",
+        "src_ip": get_client_ip(),
         "method": request.method,
         "path": request.path[:200],
         "decision": decision,

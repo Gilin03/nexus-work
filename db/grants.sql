@@ -74,3 +74,7 @@ GRANT SELECT, INSERT              ON `__DB__`.messenger_messages   TO 'nexus_app
 GRANT SELECT ON `__DB__`.confidential_documents TO 'nexus_conf'@'%';
 GRANT SELECT ON `__DB__`.payroll                TO 'nexus_conf'@'%';
 GRANT SELECT ON `__DB__`.financial_reports      TO 'nexus_conf'@'%';
+
+
+-- IP 차단 목록 (보안 관제 및 n8n 대응)
+GRANT SELECT, INSERT, UPDATE, DELETE ON __DB__.blocked_ips TO 'nexus_app'@'%';
