@@ -64,3 +64,25 @@ def detect_direct_prompt_injection(message: str) -> str | None:
                 or (_POLICY_BYPASS_EN.search(sentence) and _PROTECTED_REQUEST_EN.search(sentence))):
             return "policy_bypass_protected_data"
     return None
+
+
+# ---- 간접 프롬프트 주입 (Indirect Prompt Injection) 방어 ----
+_INDIRECT_INJECTION_PATTERN = re.compile(
+    r"(?i)(?:\[(?:AI|시스템|관리자|System|Developer)\s*(?:어시스턴트\s*)?(?:전용\s*)?(?:지시|명령|Prompt|Instruction)?[^\]]*\]|"
+    r"(?:이전|앞선|기존|위|모든)\s*(?:(?:시스템|개발자)\s*)?(?:지시|명령|프롬프트)(?:\s*사항)?(?:을|를)?\s*(?:모두|전부)?\s*(?:무시|잊어|따르지\s*마)|"
+    r"(?:ignore|disregard|forget|override)\s+(?:all\s+)?(?:previous|prior|system)\s+instructions|"
+    r"(?:내부\s*API|internal\s*api).*?(?:호출|token|nxapi_)|"
+    r"(?:기밀|비밀|admin)\s*(?:문서|비밀번호|토큰|내용).*?(?:출력|알려|보여|공개))"
+)
+
+
+def sanitize_untrusted_context(text: str, source: str = "context") -> tuple[str, bool, str | None]:
+    """사내 자료(게시글, 문서 등) 내 간접 프롬프트 주입(Indirect Prompt Injection) 시도를 탐지하고 무해화."""
+    if not text:
+        return text, False, None
+
+    normalized = unicodedata.normalize("NFKC", text)
+    if _INDIRECT_INJECTION_PATTERN.search(normalized):
+        sanitized = _INDIRECT_INJECTION_PATTERN.sub("[보안 필터: 비인가 시스템 지시문 마스킹됨]", normalized)
+        return sanitized, True, "indirect_prompt_injection"
+    return text, False, None

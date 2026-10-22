@@ -29,7 +29,7 @@
       <strong>{{ threat_level.title }}</strong>
       <span class="defcon-desc">— {{ threat_level.desc }}</span>
     </div>
-    <div class="hint" style="color: inherit; font-size: 0.8rem;">
+    <div class="defcon-meta">
       최근 관제 윈도우 기준 자동 산출
     </div>
   </div>
@@ -175,8 +175,11 @@
   <a class="btn" href="{{ url_for('admin.audit_export', period=period, type=f.type or None, decision=f.decision or None, user=f.user or None, ip=f.ip or None) }}">CSV 내보내기</a>
 </form>
 
-<div class="sheet">
-  <p class="hint">조건에 맞는 이벤트 {{ matched_n }}건{% if capped %}(최신 {{ 2000 }}건까지만 표시·내보내기){% endif %} 중 {{ events | length }}건을 보여 줍니다. 행의 "상세"를 열면 기록된 전체 내용이 보입니다.</p>
+<div class="sheet audit-log-sheet">
+  <div class="audit-log-head">
+    <h2>실시간 감사 로그 콘솔</h2>
+    <span class="hint">조건에 맞는 이벤트 {{ matched_n }}건{% if capped %}(최신 {{ 2000 }}건까지만 표시·내보내기){% endif %} 중 {{ events | length }}건 표시</span>
+  </div>
   {% if events %}
   <div class="scroll">
     <table class="audit">
@@ -206,8 +209,22 @@
             {% endif %}
           </td>
           <td>{{ e.reason }}</td>
-          <td class="mono">{{ e.method }} {{ e.path }}</td>
-          <td class="reason">{{ e.extra }}<details><summary>상세</summary><pre class="raw">{{ e.raw }}</pre></details></td>
+          <td class="mono path-cell">{{ e.method }} {{ e.path }}</td>
+          <td class="audit-action">
+            <button type="button" class="audit-toggle-btn"
+              data-time="{{ e.time }}"
+              data-event="{{ e.event_type }}"
+              data-decision="{{ e.decision }}"
+              data-user="{{ e.user }}"
+              data-role="{{ e.role }}"
+              data-ip="{{ e.src_ip }}"
+              data-reason="{{ e.reason }}"
+              data-method="{{ e.method }}"
+              data-path="{{ e.path }}"
+              data-extra="{{ e.extra }}"
+              aria-haspopup="dialog">상세</button>
+            <div class="audit-raw-hidden"><pre class="raw">{{ e.raw }}</pre></div>
+          </td>
         </tr>
       {% endfor %}
       </tbody>
@@ -218,8 +235,57 @@
     <span class="hint">{{ page }}쪽</span>
     {% if has_next %}<a class="btn" href="{{ url_for('admin.audit_log', period=period, type=f.type or None, decision=f.decision or None, user=f.user or None, ip=f.ip or None, limit=limit, page=page + 1) }}">다음 &rarr;</a>{% endif %}
   </p>
+
+  <!-- 하단 상세 로그 전용 패널 (Master-Detail Viewer) -->
+  <div id="audit-detail-panel" class="audit-detail-panel" hidden>
+    <div class="audit-detail-head">
+      <div class="audit-detail-title-wrap">
+        <span class="detail-badge-label">상세 로그</span>
+        <span id="detail-panel-badge" class="pill"></span>
+        <h3 id="detail-panel-title">보안 이벤트 상세</h3>
+      </div>
+      <button type="button" class="btn-detail-close" id="detail-panel-close-btn" aria-label="상세 로그 닫기">닫기 ×</button>
+    </div>
+
+    <div class="audit-detail-summary">
+      <div class="modal-info-grid">
+        <div class="modal-info-item highlight-reason">
+          <span class="modal-info-label">판정 사유 (Reason)</span>
+          <span id="detail-panel-reason" class="modal-info-val reason-text"></span>
+        </div>
+        <div class="modal-info-item">
+          <span class="modal-info-label">기록 시각</span>
+          <span id="detail-panel-time" class="modal-info-val mono"></span>
+        </div>
+        <div class="modal-info-item">
+          <span class="modal-info-label">요청 (Method &amp; Path)</span>
+          <span id="detail-panel-request" class="modal-info-val mono"></span>
+        </div>
+        <div class="modal-info-item">
+          <span class="modal-info-label">출발지 IP / 계정</span>
+          <span id="detail-panel-actor" class="modal-info-val"></span>
+        </div>
+        <div class="modal-info-item full-width highlight-extra">
+          <span class="modal-info-label">상세 내용 및 추가 파라미터 (Detail / Extra)</span>
+          <span id="detail-panel-extra" class="modal-info-val extra-text"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="audit-detail-body">
+      <div class="detail-code-header">
+        <span class="modal-raw-toggle">SIEM JSON 원문 데이터</span>
+        <button type="button" class="btn small" id="detail-panel-copy-btn">JSON 복사</button>
+      </div>
+      <pre id="detail-panel-code" class="modal-code-viewer"></pre>
+    </div>
+  </div>
   {% else %}
   <p class="hint">조건에 맞는 이벤트가 없습니다.</p>
   {% endif %}
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='audit-modal.js') }}" defer></script>
 {% endblock %}

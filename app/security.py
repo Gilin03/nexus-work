@@ -24,7 +24,7 @@ GRAYLOG_FIELDS = {
     "required", "resource", "field", "kind", "count", "chars", "rows", "size", "target", "action",
     "approval_id", "requester_id", "expense_id", "steps", "board", "post_id", "attachment_id", "failed_attempts",
     "conversation_id", "members", "action_level", "lock_request_id", "trigger_event_type", "window_seconds",
-    "has_token", "token_fp",
+    "has_token", "token_fp", "user_agent",
 }
 SENSITIVE_LOG_FIELDS = {
     "password", "current_password", "new_password", "confirm_password", "token", "api_token", "access_token",

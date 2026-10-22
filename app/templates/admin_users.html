@@ -50,34 +50,38 @@
 <!-- 엔터프라이즈 디렉토리 검색 및 필터 바 -->
 <div class="iam-filter-box">
   <form method="get" action="{{ url_for('admin.users') }}" class="iam-filter-form">
-    <div class="iam-filter-item" style="flex: 2; min-width: 12rem;">
-      <label for="q">계정 검색 (아이디 / 이름)</label>
-      <input type="text" id="q" name="q" value="{{ q }}" placeholder="예: hongjh 또는 홍길동" maxlength="64">
+    <div class="iam-filter-item iam-filter-item-lg">
+      <label>계정 검색 (아이디 / 이름)
+        <input type="text" id="q" name="q" value="{{ q }}" placeholder="예: hongjh 또는 홍길동" maxlength="64">
+      </label>
     </div>
-    <div class="iam-filter-item" style="flex: 1; min-width: 9rem;">
-      <label for="filter_dept">소속 부서</label>
-      <select id="filter_dept" name="dept">
-        <option value="">전체 부서</option>
-        {% for dp in depts %}<option value="{{ dp }}"{% if dp == f_dept %} selected{% endif %}>{{ dp }}</option>{% endfor %}
-      </select>
+    <div class="iam-filter-item iam-filter-item-md">
+      <label>소속 부서
+        <select id="filter_dept" name="dept">
+          <option value="">전체 부서</option>
+          {% for dp in depts %}<option value="{{ dp }}"{% if dp == f_dept %} selected{% endif %}>{{ dp }}</option>{% endfor %}
+        </select>
+      </label>
     </div>
-    <div class="iam-filter-item" style="flex: 1; min-width: 8rem;">
-      <label for="filter_role">시스템 역할</label>
-      <select id="filter_role" name="role">
-        <option value="">전체 역할</option>
-        {% for r in roles %}<option value="{{ r }}"{% if r == f_role %} selected{% endif %}>{{ role_labels.get(r, r) }}</option>{% endfor %}
-      </select>
+    <div class="iam-filter-item iam-filter-item-sm">
+      <label>시스템 역할
+        <select id="filter_role" name="role">
+          <option value="">전체 역할</option>
+          {% for r in roles %}<option value="{{ r }}"{% if r == f_role %} selected{% endif %}>{{ role_labels.get(r, r) }}</option>{% endfor %}
+        </select>
+      </label>
     </div>
-    <div class="iam-filter-item" style="flex: 1; min-width: 8rem;">
-      <label for="filter_status">보안 상태</label>
-      <select id="filter_status" name="status">
-        <option value="">전체 상태</option>
-        <option value="active"{% if f_status == 'active' %} selected{% endif %}>정상</option>
-        <option value="locked"{% if f_status == 'locked' %} selected{% endif %}>잠김</option>
-        <option value="restricted"{% if f_status == 'restricted' %} selected{% endif %}>AI 제한</option>
-      </select>
+    <div class="iam-filter-item iam-filter-item-sm">
+      <label>보안 상태
+        <select id="filter_status" name="status">
+          <option value="">전체 상태</option>
+          <option value="active"{% if f_status == 'active' %} selected{% endif %}>정상</option>
+          <option value="locked"{% if f_status == 'locked' %} selected{% endif %}>잠김</option>
+          <option value="restricted"{% if f_status == 'restricted' %} selected{% endif %}>AI 제한</option>
+        </select>
+      </label>
     </div>
-    <div style="display: flex; gap: 0.4rem;">
+    <div class="iam-filter-actions">
       <button type="submit" class="btn primary">조회</button>
       <a href="{{ url_for('admin.users') }}" class="btn">초기화</a>
     </div>

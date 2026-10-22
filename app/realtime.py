@@ -12,13 +12,13 @@
 import hashlib
 from collections import defaultdict
 
-from flask import request
+from flask import abort, request
 from flask_socketio import SocketIO, disconnect, join_room
 
 from . import db
 from .security import log_event
 
-socketio = SocketIO(async_mode="threading")
+socketio = SocketIO(async_mode="threading", allow_upgrades=False)
 _sids_by_user = defaultdict(set)  # user_id -> {sid, ...}
 
 

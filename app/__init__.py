@@ -1,7 +1,7 @@
 from flask import Flask, g, jsonify, render_template, request
 from werkzeug.exceptions import HTTPException
 
-from . import admin, ai, approvals, auth, chat, db, erp, formats, hr, internal_api, library, messenger_api, permissions, portal, profile, realtime, security, work
+from . import admin, ai, approvals, auth, chat, db, decoy, erp, formats, hr, internal_api, library, messenger_api, permissions, portal, profile, realtime, security, work
 from .config import Config
 
 ERROR_TEXT = {
@@ -44,6 +44,7 @@ def create_app(overrides=None):
     app.register_blueprint(library.bp)
     app.register_blueprint(messenger_api.bp)  # 메신저(nexus-messenger) 토큰 인증 JSON API, /api/v1/*
     app.register_blueprint(internal_api.bp)  # 실습용 내부 API(토큰 검사, 호출 로그 via=direct), /internal/api/v1/*
+    app.register_blueprint(decoy.bp)  # 공격자·스캐너 탐지용 허니팟(Decoy Canary), /.env, /.git/config 등
     realtime.init_app(app)  # 메신저 실시간 전송(Socket.IO)
     default_responder = (
         chat.placeholder_responder

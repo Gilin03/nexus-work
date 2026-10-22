@@ -20,6 +20,7 @@ from flask import current_app, g, has_request_context, request, session
 from . import chat, db
 from .hr import leave_balance, today_kst
 from .permissions import can
+from .prompt_injection import sanitize_untrusted_context
 from .security import log_event
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -109,17 +110,21 @@ def build_context(user: dict, message: str) -> str:
             log_event("authz_deny", "DENY", "insufficient_role", resource="confidential_documents", source="ai")
             sections.append("[기밀 문서함]\n- [권한 없음] 기밀 문서함은 팀장(manager) 이상만 열람할 수 있습니다.")
 
-    # 3. 공지사항·자유게시판
+    # 3. 공지사항·자유게시판 (간접 프롬프트 인젝션 무해화 및 보안 감사)
     if _has_any(message, _KW_BOARD):
         posts = db.query_all(
             "SELECT p.id, p.board, p.title, p.body, u.display_name AS author "
             "FROM posts p JOIN users u ON u.id = p.author_id ORDER BY p.id DESC LIMIT 5"
         )
         if posts:
-            lines = [
-                f"- [{'공지' if p['board'] == 'notice' else '자유'}] {p['title']} (작성자: {p['author']}): {p['body'][:150]}"
-                for p in posts
-            ]
+            lines = []
+            for p in posts:
+                raw_body = (p.get("body") or "")[:150]
+                clean_body, was_injected, pattern = sanitize_untrusted_context(raw_body, source=f"post:{p['id']}")
+                if was_injected:
+                    log_event("prompt_injection_detected", "BLOCK", "indirect_prompt_injection",
+                              injection_type="indirect", source_type="board", post_id=p["id"], pattern_id=pattern)
+                lines.append(f"- [{'공지' if p['board'] == 'notice' else '자유'}] {p['title']} (작성자: {p['author']}): {clean_body}")
             sections.append("[최근 게시글]\n" + "\n".join(lines))
 
     # 4. 인사·조직도·근태·휴가

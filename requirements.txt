@@ -6,3 +6,4 @@ python-dotenv==1.2.4
 pytest==9.1.1
 flask-socketio==5.7.0
 pypdf==6.1.1
+waitress==3.0.2
