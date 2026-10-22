@@ -24,17 +24,17 @@ from datetime import datetime, timedelta
 import pymysql
 from flask import Blueprint, Response, abort, current_app, g, redirect, render_template, request, url_for
 
-from . import audit, db, validators
+from . import audit, db, security, validators
 from .approvals import conflict, forbidden
 from .auth import hash_password
 from .hr import today_kst
-from .permissions import (ALLOWED_TITLES, DEFAULT_TITLE, FINANCE_TEAMS, HR_TEAMS, PINNED_USERS, RANKS, SECURITY_TEAM, can, matrix,
+from .permissions import (ALLOWED_TITLES, DEFAULT_TITLE, FINANCE_TEAMS, HR_TEAMS, PINNED_USERS, RANKS, ROLES, ROLE_LABELS, SECURITY_TEAM, can, matrix,
                           permission_required)
 from .security import log_event
 
 bp = Blueprint("admin", __name__, url_prefix="/admin")
 
-ROLES = ("employee", "manager", "admin")
+# ROLES is imported from permissions
 
 
 @bp.before_request
@@ -42,7 +42,7 @@ def require_admin():
     if not g.user:
         log_event("authz_deny", "DENY", "not_logged_in")
         return redirect(url_for("auth.login"), 303)
-    if g.user["role"] != "admin":
+    if g.user["role"] not in ("admin", "sec_admin", "hr_admin", "finance_admin"):
         return forbidden("insufficient_role", required="admin")
 
 
@@ -57,9 +57,38 @@ def users():
     deleted = db.query_all(
         "SELECT u.id, u.username, u.display_name, u.dept, u.deleted_at, d.username AS deleted_by FROM users u "
         "LEFT JOIN users d ON d.id = u.deleted_by WHERE u.deleted_at IS NOT NULL ORDER BY u.deleted_at DESC LIMIT 200")
-    return render_template("admin_users.html", rows=rows, roles=ROLES, titles=ALLOWED_TITLES, deleted=deleted,
+
+    stats = {
+        "total": len(rows),
+        "active": sum(1 for u in rows if not u["is_locked"]),
+        "locked": sum(1 for u in rows if u["is_locked"]),
+        "admin": sum(1 for u in rows if u["role"] == "admin"),
+        "deleted": len(deleted),
+    }
+
+    q = request.args.get("q", "").strip()
+    f_dept = request.args.get("dept", "").strip()
+    f_role = request.args.get("role", "").strip()
+    f_status = request.args.get("status", "").strip()
+
+    filtered = rows
+    if q:
+        filtered = [u for u in filtered if q.lower() in u["username"].lower() or (u["display_name"] and q.lower() in u["display_name"].lower())]
+    if f_dept:
+        filtered = [u for u in filtered if u["dept"] == f_dept]
+    if f_role and f_role in ROLES:
+        filtered = [u for u in filtered if u["role"] == f_role]
+    if f_status == "locked":
+        filtered = [u for u in filtered if u["is_locked"]]
+    elif f_status == "active":
+        filtered = [u for u in filtered if not u["is_locked"]]
+    elif f_status == "restricted":
+        filtered = [u for u in filtered if u.get("ai_restricted")]
+
+    return render_template("admin_users.html", rows=filtered, roles=ROLES, role_labels=ROLE_LABELS, titles=ALLOWED_TITLES, deleted=deleted,
                            can_delete=can(g.user, "users.delete"), depts=dept_options(), new_dept=NEW_DEPT,
-                           me_pinned=bool(g.user.get("pinned")))
+                           me_pinned=bool(g.user.get("pinned")), stats=stats,
+                           q=q, f_dept=f_dept, f_role=f_role, f_status=f_status)
 
 
 @bp.post("/users/<int:user_id>/role")
@@ -196,7 +225,7 @@ def dept_options():
 
 
 def _new_form(error=None, status=200, values=None):
-    return render_template("admin_user_new.html", roles=ROLES, titles=TITLES, ranks=RANKS, security_team=SECURITY_TEAM, error=error,
+    return render_template("admin_user_new.html", roles=ROLES, role_labels=ROLE_LABELS, titles=TITLES, ranks=RANKS, security_team=SECURITY_TEAM, error=error,
                            values=values or {}, depts=dept_options(), new_dept=NEW_DEPT), status
 
 
@@ -432,13 +461,37 @@ def _dashboard_page(f, period, limit, page, error=None, status=200):
     truncated = bool(res["oldest"]) and not res["reached_start"] and res["oldest"] > res["since"] + grace
     if status == 200:
         log_event("admin_action", "INFO", "audit_view", action="audit_view", period=period, rows=len(shown))
+
+    try:
+        blocked_row = db.query_one("SELECT COUNT(*) AS n FROM blocked_ips WHERE blocked_until > NOW()")
+        blocked_ips_count = blocked_row["n"] if blocked_row else 0
+    except Exception:
+        blocked_ips_count = 0
+
+    bad_count = summary["deny"] + summary["block"] + summary["warn"]
+    if summary["block"] > 10 or bad_count > 50:
+        threat_level = {"code": "DEFCON 1", "title": "CRITICAL THREAT", "class": "defcon-critical", "desc": "능동 침해 공격 다수 감지 — 비상 방어 모드"}
+    elif summary["block"] > 0 or summary["deny"] > 5 or bad_count > 10:
+        threat_level = {"code": "DEFCON 2", "title": "ELEVATED THREAT", "class": "defcon-elevated", "desc": "비인가 접근 및 공격 시도 감지 — 적극 차단/추적 중"}
+    elif bad_count > 0:
+        threat_level = {"code": "DEFCON 3", "title": "GUARDED", "class": "defcon-guarded", "desc": "경미한 이상 징후 감지 — 상시 모니터링 모드"}
+    else:
+        threat_level = {"code": "DEFCON 4", "title": "NORMAL SECURE", "class": "defcon-normal", "desc": "모든 인프라 지표 정상 — 침해 시도 없음"}
+
+    soc_pipeline = [
+        {"name": "WAF / Gateway", "target": "pfSense (192.168.3.10)", "status": "ONLINE", "cls": "soc-green"},
+        {"name": "SIEM Collector", "target": "Graylog (192.168.3.15)", "status": "STREAMING", "cls": "soc-green"},
+        {"name": "EDR / FIM Agent", "target": "Wazuh (nexus-board-14)", "status": "ONLINE", "cls": "soc-green"},
+        {"name": "SOAR Engine", "target": "n8n Auto-Ban", "status": "READY", "cls": "soc-cyan"},
+    ]
+
     return render_template(
         "admin_audit.html", f=f, period=period, periods=audit.PERIODS, limit=limit, limits=audit.PAGE_SIZES, page=page, error=error,
         decisions=audit.DECISIONS, kinds=sorted(res["kinds"]), summary=summary, threats=threats, chart=audit.chart(res), series=audit.SERIES,
         top_kinds=res["kinds"].most_common(10), top_ips=res["bad_ips"].most_common(10), top_fail_users=res["fail_users"].most_common(10),
         top_suspicious=res["suspicious"].most_common(8), locked=_locked_accounts(), events=shown, matched_n=res["matched_n"],
         capped=res["matched_n"] > audit.MAX_MATCH, has_prev=page > 1, has_next=start + limit < len(res["matched"]), covered=covered,
-        truncated=truncated, hourly=res["hourly"]), status
+        truncated=truncated, hourly=res["hourly"], blocked_ips_count=blocked_ips_count, threat_level=threat_level, soc_pipeline=soc_pipeline), status
 
 
 @bp.get("/audit")
@@ -517,16 +570,18 @@ def permissions():
 
 
 @bp.get("/blocked-ips")
+@permission_required("security.dashboard")
 def list_blocked_ips():
     rows = db.query_all(
         "SELECT id, ip_address, reason, blocked_until, created_at, created_by, "
         "CASE WHEN blocked_until > NOW() THEN 1 ELSE 0 END AS is_active "
         "FROM blocked_ips ORDER BY blocked_until DESC LIMIT 100"
     )
-    return render_template("admin_blocked_ips.html", rows=rows)
+    return render_template("admin_blocked_ips.html", rows=rows, prefill_ip=request.args.get("ip", "").strip())
 
 
 @bp.post("/blocked-ips")
+@permission_required("security.dashboard")
 def add_blocked_ip():
     ip = request.form.get("ip_address", "").strip()
     reason = request.form.get("reason", "manual_block").strip()[:100]
@@ -537,12 +592,13 @@ def add_blocked_ip():
     if not ip or ip in ("127.0.0.1", "::1"):
         return redirect(url_for("admin.list_blocked_ips"), 303)
     security.block_ip(ip, reason=reason, minutes=minutes, created_by=g.user.get("username", "admin"))
-    security.log_event("admin_action", "ALLOW", "block_ip", action="block_ip", target=ip, reason=reason, minutes=minutes)
+    log_event("admin_action", "ALLOW", "block_ip", action="block_ip", target=ip, block_reason=reason, minutes=minutes)
     return redirect(url_for("admin.list_blocked_ips"), 303)
 
 
 @bp.post("/blocked-ips/<path:ip>/unblock")
+@permission_required("security.dashboard")
 def remove_blocked_ip(ip):
     security.unblock_ip(ip)
-    security.log_event("admin_action", "ALLOW", "unblock_ip", action="unblock_ip", target=ip)
+    log_event("admin_action", "ALLOW", "unblock_ip", action="unblock_ip", target=ip)
     return redirect(url_for("admin.list_blocked_ips"), 303)

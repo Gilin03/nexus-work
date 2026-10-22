@@ -1,8 +1,89 @@
 {% extends "base.html" %}
-{% block title %}사용자 관리 · NEXUS WORK{% endblock %}
+{% block title %}사용자 관리 · NEXUS IAM 디렉토리{% endblock %}
 {% block content %}
-<h1>사용자 관리</h1>
-<p><a class="btn primary" href="{{ url_for('admin.user_new') }}">사용자 등록</a></p>
+
+<!-- 엔터프라이즈 IAM 디렉토리 헤더 & 지표 -->
+<div class="iam-hero">
+  <div class="iam-hero-top">
+    <div class="iam-title-wrap">
+      <h1>사용자 관리</h1>
+      <span class="iam-badge-ent">ENTERPRISE IAM & RBAC</span>
+    </div>
+    <div class="soc-hero-actions">
+      <a href="{{ url_for('admin.user_new') }}" class="soc-btn soc-btn-danger">
+        + 신규 사용자 등록
+      </a>
+      <a href="{{ url_for('admin.permissions') }}" class="soc-btn soc-btn-outline">
+        권한 현황(RBAC Matrix)
+      </a>
+    </div>
+  </div>
+  <p class="iam-hero-meta">
+    사내 통합 계정 및 접근 제어(IAM): 부서 인사 발령, 직급 체계, 역할 기반 권한 제어(RBAC), 비정상 공격 시도에 따른 계정 보안 격리 및 복구를 총괄합니다.
+  </p>
+</div>
+
+<!-- 엔터프라이즈 계정 현황 KPI 지표 카드 -->
+<ul class="iam-stats" aria-label="계정 통계">
+  <li class="iam-stat-card">
+    <span class="iam-val">{{ "{:,}".format(stats.total) }}</span>
+    <span class="iam-label">전체 활성 계정</span>
+  </li>
+  <li class="iam-stat-card stat-ok">
+    <span class="iam-val">{{ "{:,}".format(stats.active) }}</span>
+    <span class="iam-label">정상 로그인 상태</span>
+  </li>
+  <li class="iam-stat-card stat-danger">
+    <span class="iam-val">{{ "{:,}".format(stats.locked) }}</span>
+    <span class="iam-label">보안 격리(잠김) 계정</span>
+  </li>
+  <li class="iam-stat-card">
+    <span class="iam-val">{{ "{:,}".format(stats.admin) }}</span>
+    <span class="iam-label">특권 관리자(Admin)</span>
+  </li>
+  <li class="iam-stat-card">
+    <span class="iam-val">{{ "{:,}".format(stats.deleted) }}</span>
+    <span class="iam-label">퇴사/삭제 보관 계정</span>
+  </li>
+</ul>
+
+<!-- 엔터프라이즈 디렉토리 검색 및 필터 바 -->
+<div class="iam-filter-box">
+  <form method="get" action="{{ url_for('admin.users') }}" class="iam-filter-form">
+    <div class="iam-filter-item" style="flex: 2; min-width: 12rem;">
+      <label for="q">계정 검색 (아이디 / 이름)</label>
+      <input type="text" id="q" name="q" value="{{ q }}" placeholder="예: hongjh 또는 홍길동" maxlength="64">
+    </div>
+    <div class="iam-filter-item" style="flex: 1; min-width: 9rem;">
+      <label for="filter_dept">소속 부서</label>
+      <select id="filter_dept" name="dept">
+        <option value="">전체 부서</option>
+        {% for dp in depts %}<option value="{{ dp }}"{% if dp == f_dept %} selected{% endif %}>{{ dp }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="iam-filter-item" style="flex: 1; min-width: 8rem;">
+      <label for="filter_role">시스템 역할</label>
+      <select id="filter_role" name="role">
+        <option value="">전체 역할</option>
+        {% for r in roles %}<option value="{{ r }}"{% if r == f_role %} selected{% endif %}>{{ role_labels.get(r, r) }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="iam-filter-item" style="flex: 1; min-width: 8rem;">
+      <label for="filter_status">보안 상태</label>
+      <select id="filter_status" name="status">
+        <option value="">전체 상태</option>
+        <option value="active"{% if f_status == 'active' %} selected{% endif %}>정상</option>
+        <option value="locked"{% if f_status == 'locked' %} selected{% endif %}>잠김</option>
+        <option value="restricted"{% if f_status == 'restricted' %} selected{% endif %}>AI 제한</option>
+      </select>
+    </div>
+    <div style="display: flex; gap: 0.4rem;">
+      <button type="submit" class="btn primary">조회</button>
+      <a href="{{ url_for('admin.users') }}" class="btn">초기화</a>
+    </div>
+  </form>
+</div>
+
 <div class="sheet">
   <p class="hint">부서·역할·직급 변경은 즉시 적용됩니다(부서를 바꾸면 인사카드 부서도 같이 바뀌고 팀 권한·팀 일정 범위가 새 부서 기준이 됩니다). 고정 계정의 부서는 최고관리자만 바꿀 수 있습니다. 본인 계정은 부서·역할·직급 변경, 비밀번호 초기화, 잠금을 할 수 없습니다. <strong>고정</strong> 표시가 있는 최고관리자 계정(admin·hongjh)은 항상 관리자 역할이며 역할 변경·잠금·비밀번호 초기화·삭제를 할 수 없습니다. 사용자 삭제는 최고관리자만 할 수 있습니다. 비밀번호 초기화는 임시 비밀번호를 한 번만 보여 주며, 그 사용자의 로그인 상태를 모두 끊고 잠금도 풀어 줍니다.</p>
   <div class="scroll">
@@ -30,16 +111,18 @@
           {% endif %}
         </td>
         <td>
-          {% if u.id == g.user.id %}
-            {{ u.role }} (본인)
+          {% if u.pinned and u.role == 'admin' %}
+            <span class="role-badge role-admin">최고관리자</span>{% if u.id == g.user.id %} (본인){% endif %}
+          {% elif u.id == g.user.id %}
+            <span class="role-badge role-{{ u.role }}">{{ role_labels.get(u.role, u.role) }}</span> (본인)
           {% elif u.pinned %}
-            {{ u.role }}
+            <span class="role-badge role-{{ u.role }}">{{ role_labels.get(u.role, u.role) }}</span>
           {% else %}
           <form method="post" action="{{ url_for('admin.change_role', user_id=u.id) }}" class="inline">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="current_role" value="{{ u.role }}">
             <select name="role" aria-label="{{ u.username }} 역할">
-              {% for r in roles %}<option value="{{ r }}"{% if r == u.role %} selected{% endif %}>{{ r }}</option>{% endfor %}
+              {% for r in roles %}<option value="{{ r }}"{% if r == u.role %} selected{% endif %}>{{ role_labels.get(r, r) }}</option>{% endfor %}
             </select>
             <button type="submit">변경</button>
           </form>
@@ -86,6 +169,7 @@
   </table>
   </div>
 </div>
+
 {% if deleted %}
 <div class="sheet">
   <h2>삭제된 계정 ({{ deleted | length }})</h2>

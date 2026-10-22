@@ -46,3 +46,34 @@ def test_ip_blocking_lifecycle(app, client):
 
     res_after = client.get("/login", environ_base={"REMOTE_ADDR": "192.168.3.10"}, headers={"X-Forwarded-For": test_ip})
     assert res_after.status_code == 200
+
+
+def test_admin_blocked_ips_views(aapp, root):
+    from support import as_user, post
+    c = as_user(aapp, "zz_sec")
+    
+    # 1. 목록 화면 조회
+    res = c.get("/admin/blocked-ips?ip=192.168.99.77")
+    assert res.status_code == 200
+    html = res.get_data(as_text=True)
+    assert "차단 IP 관리" in html
+    assert 'value="192.168.99.77"' in html
+    
+    # 2. 수동 IP 차단 등록 POST
+    res_post = post(c, "/admin/blocked-ips", ip_address="192.168.99.77", reason="manual_admin_test", minutes="30")
+    assert res_post.status_code == 303
+    assert res_post.headers["Location"].endswith("/admin/blocked-ips")
+    
+    # 차단 확인
+    with aapp.app_context():
+        blocked, reason = security.is_ip_blocked("192.168.99.77")
+        assert blocked is True
+        assert reason == "manual_admin_test"
+    
+    # 3. 차단 해제 POST
+    res_unblock = post(c, "/admin/blocked-ips/192.168.99.77/unblock")
+    assert res_unblock.status_code == 303
+    
+    with aapp.app_context():
+        blocked, _ = security.is_ip_blocked("192.168.99.77")
+        assert blocked is False

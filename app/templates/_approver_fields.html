@@ -5,7 +5,7 @@
   <label>{{ n }}차 결재자{% if n == 1 %} (필수){% endif %}
     <select name="approver_{{ n }}"{% if n == 1 %} required{% endif %}>
       <option value="">{% if n == 1 %}선택하세요{% else %}(없음){% endif %}</option>
-      {% for c in candidates %}<option value="{{ c.id }}"{% if chosen | length >= n and chosen[n - 1] == c.id %} selected{% endif %}>{{ c.display_name }} · {{ c.dept }} · {{ c.role }}</option>{% endfor %}
+      {% for c in candidates %}<option value="{{ c.id }}"{% if chosen | length >= n and chosen[n - 1] == c.id %} selected{% endif %}>{{ c.display_name }}{% if c.title %} ({{ c.title }}){% endif %} · {{ c.dept }} · {{ role_labels.get(c.role, c.role) if role_labels else c.role }}</option>{% endfor %}
     </select>
   </label>
   {% endfor %}

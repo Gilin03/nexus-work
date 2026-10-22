@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}{{ e.name }} 인사카드 수정 · NEXUS WORK{% endblock %}
+{% block content %}
+<a class="crumb" href="{{ url_for('hr.card_detail', emp_id=e.id) }}">&larr; 인사카드</a>
+<h1>인사카드 수정</h1>
+<div class="sheet narrow">
+  {% if error %}<p class="alert" role="alert">{{ error }}</p>{% endif %}
+  <p class="hint">인사카드의 사번, 성명, 부서, 직급, 내선번호, 입사일, 연차 정보를 수정합니다. 성명과 부서를 변경하면 연결된 사원 로그인 계정 정보에도 자동 반영됩니다.</p>
+  <form method="post" action="{{ url_for('hr.card_edit', emp_id=e.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>사번
+      <input type="text" name="emp_no" value="{{ e.emp_no or '' }}" maxlength="32" placeholder="예: NX-2026-001">
+    </label>
+    <label>이름 (성명)
+      <input type="text" name="name" value="{{ e.name }}" required maxlength="64">
+    </label>
+    <label>소속 부서
+      <select name="dept" required>
+        {% for dp in depts %}<option value="{{ dp }}"{% if dp == e.dept %} selected{% endif %}>{{ dp }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>직급
+      <select name="title">
+        <option value="">직급 없음</option>
+        {% for t in ranks %}<option value="{{ t }}"{% if t == e.title %} selected{% endif %}>{{ t }}</option>{% endfor %}
+      </select>
+    </label>
+    <label>사내 내선번호
+      <input type="text" name="ext" value="{{ e.ext or '' }}" maxlength="16" placeholder="예: 2100">
+    </label>
+    <label>입사일
+      <input type="date" name="hire_date" value="{{ e.hire_date.strftime('%Y-%m-%d') if e.hire_date else '' }}">
+    </label>
+    <label>부여 연차 일수
+      <input type="number" name="annual_days" value="{{ e.annual_days }}" min="0" max="100" required>
+    </label>
+    <div class="actions" style="margin-top: 1.2rem;">
+      <button type="submit" class="btn primary">수정 내용 저장</button>
+      <a href="{{ url_for('hr.card_detail', emp_id=e.id) }}" class="btn">취소</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

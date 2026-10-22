@@ -10,7 +10,7 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="form-row">
       <label for="ip_address">IP 주소</label>
-      <input type="text" id="ip_address" name="ip_address" placeholder="예: 192.168.3.100" required maxlength="45">
+      <input type="text" id="ip_address" name="ip_address" value="{{ prefill_ip or '' }}" placeholder="예: 192.168.3.100" required maxlength="45">
     </div>
     <div class="form-row">
       <label for="reason">차단 사유</label>

@@ -43,7 +43,8 @@ def test_every_admin_route_requires_admin(aapp, root):
     assert {r.rule for r in rules} == {
         "/admin/users", "/admin/users/new", "/admin/users/<int:user_id>/role", "/admin/users/<int:user_id>/unlock",
         "/admin/users/<int:user_id>/lock", "/admin/users/<int:user_id>/reset-password", "/admin/overview", "/admin/audit",
-        "/admin/audit/export.csv", "/admin/users/<int:user_id>/title", "/admin/users/<int:user_id>/dept", "/admin/users/<int:user_id>/delete", "/admin/users/<int:user_id>/restore", "/admin/permissions"}
+        "/admin/audit/export.csv", "/admin/users/<int:user_id>/title", "/admin/users/<int:user_id>/dept", "/admin/users/<int:user_id>/delete", "/admin/users/<int:user_id>/restore", "/admin/permissions",
+        "/admin/blocked-ips", "/admin/blocked-ips/<path:ip>/unblock"}
     before = snapshot(root)
     anon, emp, mgr = aapp.test_client(), as_user(aapp, "zz_emp"), as_user(aapp, "zz_mgr")
     for rule in rules:
@@ -89,6 +90,16 @@ def test_user_list_shows_users_state_and_hides_secrets(aapp, root):
     assert "argon2" not in html and "password_hash" not in html and PW_HASH[:20] not in html   # 비밀번호 해시는 화면에 없다
     own_row = re.search(r"<tr>\s*<td>zz_adm</td>.*?</tr>", html, re.S).group(0)
     assert "(본인)" in own_row and "<select" not in own_row                           # 본인 행에는 역할 변경이 없다
+
+def test_user_list_search_and_filters(aapp, root):
+    adm = as_user(aapp, "zz_adm")
+    # 1. 아이디 검색
+    h_q = adm.get("/admin/users?q=zz_emp2").get_data(as_text=True)
+    assert "zz_emp2" in h_q and "zz_mgr" not in h_q
+    # 2. 역할 필터
+    h_role = adm.get("/admin/users?role=manager").get_data(as_text=True)
+    assert "zz_mgr" in h_role and "zz_emp2" not in h_role
+
 
 
 # ---------- 역할 변경 ----------
@@ -179,25 +190,21 @@ def test_extra_form_fields_cannot_change_other_columns(aapp, root):
     assert after == before and role_of(root, "zz_emp") == "manager"
 
 
-# ---------- 역할 변경이 결재에 미치는 영향 ----------
-def test_demoted_approver_can_no_longer_decide_pending_approvals(aapp, root, events):
+# ---------- 결재선 전체 사원 선택 및 결재 처리 ----------
+def test_all_employees_can_be_approvers_and_decide(aapp, root, events):
     a = pending_approval(root, "zz_emp", "zz_mgr")
     mgr = as_user(aapp, "zz_mgr")
     assert 'name="decision"' in mgr.get(f"/approvals/{a}").get_data(as_text=True)
-    set_role(as_user(aapp, "zz_adm"), root, "zz_mgr", "employee", "manager")
     r = post(mgr, f"/approvals/{a}/decide", decision="approve")
-    assert r.status_code == 403
-    assert sql(root, "SELECT status FROM approvals WHERE id=%s", (a,))[0][0] == "pending"
-    assert sql(root, "SELECT status FROM approval_steps WHERE approval_id=%s", (a,))[0][0] == "pending"
-    assert any(e["event_type"] == "authz_deny" and e["reason"] == "approver_role_revoked" and e["user"] == "zz_mgr" for e in events())
+    assert r.status_code == 303
+    assert sql(root, "SELECT status FROM approvals WHERE id=%s", (a,))[0][0] == "approved"
 
 
-def test_demoted_manager_disappears_from_approver_candidates(aapp, root):
+def test_all_employees_appear_in_approver_candidates(aapp, root):
     emp = as_user(aapp, "zz_emp")
-    approvers = lambda: emp.get("/approvals/new").get_data(as_text=True).split('name="cc"')[0]   # 결재자 선택 칸만
-    assert f'value="{uid(root, "zz_mgr")}"' in approvers()
-    set_role(as_user(aapp, "zz_adm"), root, "zz_mgr", "employee", "manager")
-    assert f'value="{uid(root, "zz_mgr")}"' not in approvers()
+    approvers = emp.get("/approvals/new").get_data(as_text=True).split('name="cc"')[0]   # 결재자 선택 칸만
+    assert f'value="{uid(root, "zz_mgr")}"' in approvers
+    assert f'value="{uid(root, "zz_emp2")}"' in approvers  # 일반 사원도 결재선에 포함
 
 
 # ---------- 잠금 해제 ----------

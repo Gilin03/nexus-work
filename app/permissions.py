@@ -15,9 +15,39 @@ from .security import log_event
 
 RANKS = ("사원", "대리", "과장", "팀장", "관리자")
 SENIOR = 3                                   # 과장 이상(직급 번호 3)
-ROLE_RANKS = {"employee": (1, 3), "manager": (4, 4), "admin": (5, 5)}
-DEFAULT_TITLE = {"employee": "사원", "manager": "팀장", "admin": "관리자"}
-ALLOWED_TITLES = {"employee": ("사원", "대리", "과장"), "manager": ("팀장",), "admin": ("관리자",)}
+ROLE_RANKS = {
+    "employee": (1, 3),
+    "manager": (4, 4),
+    "admin": (5, 5),
+    "sec_admin": (3, 5),
+    "hr_admin": (3, 5),
+    "finance_admin": (3, 5),
+}
+DEFAULT_TITLE = {
+    "employee": "사원",
+    "manager": "팀장",
+    "admin": "관리자",
+    "sec_admin": "과장",
+    "hr_admin": "과장",
+    "finance_admin": "과장",
+}
+ALLOWED_TITLES = {
+    "employee": ("사원", "대리", "과장"),
+    "manager": ("팀장",),
+    "admin": ("관리자",),
+    "sec_admin": ("과장", "팀장", "관리자"),
+    "hr_admin": ("과장", "팀장", "관리자"),
+    "finance_admin": ("과장", "팀장", "관리자"),
+}
+ROLES = ("employee", "manager", "admin", "sec_admin", "hr_admin", "finance_admin")
+ROLE_LABELS = {
+    "employee": "일반사원",
+    "manager": "부서팀장",
+    "sec_admin": "보안관리자(SOC)",
+    "hr_admin": "인사관리자(HR)",
+    "finance_admin": "재무관리자(Finance)",
+    "admin": "최고관리자",
+}
 SECURITY_TEAM = "보안관제팀"
 FINANCE_TEAMS = ("경영지원팀", "재무팀")
 HR_TEAMS = ("경영지원팀", "인사팀")
@@ -40,25 +70,25 @@ def subject(user):
 
 
 def _manager_up(s):
-    return s["role"] in ("manager", "admin")
+    return s["role"] in ("manager", "admin", "sec_admin", "hr_admin", "finance_admin")
 
 
 # (키, 이름, 규칙, 팀·직급 조건 설명). 규칙은 subject() 결과를 받아 True/False 를 돌려준다.
 PERMS = [
-    ("doc.confidential", "기밀 문서함 열람", lambda s: _manager_up(s), "팀장 이상(역할 manager·admin)"),
-    ("finance.view", "재무 보고 열람", lambda s: _manager_up(s) or (s["dept"] in FINANCE_TEAMS and s["rank"] >= SENIOR),
-     "팀장 이상, 또는 경영지원·재무팀 과장 이상"),
-    ("payroll.all", "전사 급여 조회", lambda s: s["role"] == "admin" or (s["dept"] in FINANCE_TEAMS and s["rank"] >= SENIOR),
-     "관리자, 또는 경영지원·재무팀 과장 이상"),
-    ("hr.cards.all", "전사 인사카드 조회", lambda s: s["role"] == "admin" or (s["dept"] in HR_TEAMS and s["rank"] >= SENIOR),
-     "관리자, 또는 경영지원·인사팀 과장 이상"),
-    ("notice.write", "공지사항 글쓰기", lambda s: _manager_up(s) or s["rank"] >= SENIOR, "과장 이상"),
-    ("project.create", "프로젝트 만들기", lambda s: _manager_up(s) or s["rank"] >= SENIOR, "과장 이상"),
+    ("doc.confidential", "기밀 문서함 열람", lambda s: _manager_up(s), "팀장 이상(역할 manager·admin 등)"),
+    ("finance.view", "재무 보고 열람", lambda s: s["role"] == "finance_admin" or _manager_up(s) or (s["dept"] in FINANCE_TEAMS and s["rank"] >= SENIOR),
+     "재무관리자, 팀장 이상, 또는 경영지원·재무팀 과장 이상"),
+    ("payroll.all", "전사 급여 조회", lambda s: s["role"] in ("admin", "finance_admin") or (s["dept"] in FINANCE_TEAMS and s["rank"] >= SENIOR),
+     "최고관리자, 재무관리자, 또는 경영지원·재무팀 과장 이상"),
+    ("hr.cards.all", "전사 인사카드 조회", lambda s: s["role"] in ("admin", "hr_admin") or (s["dept"] in HR_TEAMS and s["rank"] >= SENIOR),
+     "최고관리자, 인사관리자, 또는 경영지원·인사팀 과장 이상"),
+    ("notice.write", "공지사항 글쓰기", lambda s: _manager_up(s) or s["rank"] >= SENIOR, "과장 이상 및 관리자"),
+    ("project.create", "프로젝트 만들기", lambda s: _manager_up(s) or s["rank"] >= SENIOR, "과장 이상 및 관리자"),
     ("folder.create", "자료실 폴더 만들기", lambda s: _manager_up(s) or s["rank"] >= SENIOR, "과장 이상(최상위 폴더는 자기 부서 공개로 고정)"),
-    ("users.manage", "사용자 관리·역할·직급 변경", lambda s: s["role"] == "admin", "관리자(역할 admin)"),
+    ("users.manage", "사용자 관리·역할·직급 변경", lambda s: s["role"] in ("admin", "hr_admin"), "최고관리자 및 인사관리자"),
     ("users.delete", "사용자 삭제·복구(재입사)", lambda s: s["role"] == "admin" and s["pinned"], "최고관리자(admin·hongjh)만"),
     ("security.dashboard", "보안 대시보드·감사 로그·내보내기",
-     lambda s: s["role"] == "admin" and (s["pinned"] or s["dept"] == SECURITY_TEAM), "보안관제팀 소속 관리자 또는 최고관리자(admin·hongjh)만"),
+     lambda s: (s["role"] in ("admin", "sec_admin")) and (s["pinned"] or s["role"] == "sec_admin" or s["dept"] == SECURITY_TEAM), "보안관리자, 보안관제팀 관리자 또는 최고관리자(admin·hongjh)만"),
 ]
 PERMS_BY_KEY = {p[0]: p for p in PERMS}
 

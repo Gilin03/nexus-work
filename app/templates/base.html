@@ -87,7 +87,7 @@
       </a>
       <span class="who-text">
         <strong>{{ g.user.display_name }}님</strong>
-        <span>{{ g.user.dept }} · {{ g.user.role }}</span>
+        <span>{{ g.user.dept }} · {{ g.user.role_label or g.user.role }}</span>
       </span>
       <a href="{{ url_for('auth.change_password') }}">비밀번호 변경</a>
       <form method="post" action="{{ url_for('auth.logout') }}">

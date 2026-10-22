@@ -69,7 +69,11 @@ class GelfQueueHandler(logging.Handler):
 
     def emit(self, record):
         try:
-            payload = gelf(json.loads(record.getMessage()), self.source)
+            event = json.loads(record.getMessage())
+            client_ip = event.get('src_ip')
+            use_client_source = os.environ.get('GRAYLOG_SOURCE_CLIENT_IP') == '1' and client_ip and client_ip != '-'
+            source_to_use = client_ip if use_client_source else self.source
+            payload = gelf(event, source_to_use)
             if len(payload) > 8000:
                 raise ValueError('oversized')
             self.pending.put_nowait(payload)

@@ -2,6 +2,7 @@
 import gzip
 import hmac
 import json
+import os
 import logging
 import re
 import secrets
@@ -179,13 +180,28 @@ class GelfUdpHandler(logging.Handler):
             if not isinstance(event_type, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", event_type):
                 event_type = "security_event"
             severity = self._severity(event)
+            src_ip = event.get("src_ip") or "-"
+
+            # 관제(Graylog SIEM)에서 14번 서버 IP 대신 실제 클라이언트 IP가 Source 컬럼에 노출되도록 지원
+            use_client_as_source = os.environ.get("GRAYLOG_SOURCE_CLIENT_IP") == "1"
+            if current_app and current_app.config.get("TESTING") and not current_app.config.get("GRAYLOG_SOURCE_CLIENT_IP"):
+                use_client_as_source = False
+
+            display_host = src_ip if (use_client_as_source and src_ip and src_ip != "-") else "nexus-portal"
+            short_msg = f"[{src_ip}] {event_type} {event.get('path', '')}".strip() if use_client_as_source else event_type
+
             payload = {
                 "version": "1.1",
-                "host": "nexus-portal",
-                "short_message": event_type,
+                "host": display_host,
+                "short_message": short_msg,
                 "timestamp": self._timestamp(event.get("ts")),
                 "level": SEVERITY_LEVELS[severity],
             }
+            if use_client_as_source and src_ip and src_ip != "-":
+                payload["_client_ip"] = src_ip
+                payload["_real_ip"] = src_ip
+                payload["_srcip"] = src_ip
+                payload["_server_host"] = "nexus-portal-14"
             for name in GRAYLOG_FIELDS:
                 if name == "ts" or name not in event or _is_sensitive_log_field(name, event[name]):
                     continue
@@ -244,6 +260,7 @@ def log_event(event_type: str, decision: str = "INFO", reason: str = "", **extra
     severity = extra.pop("severity", None)
     if not isinstance(severity, str) or severity not in SEVERITY_LEVELS:
         severity = {"ERROR": "high", "DENY": "medium", "BLOCK": "medium", "WARN": "low"}.get(decision, "info")
+    client_ip_val = get_client_ip()
     record = {
         "ts": datetime.now(timezone.utc).isoformat(timespec="microseconds"),
         "event_type": event_type,
@@ -252,7 +269,9 @@ def log_event(event_type: str, decision: str = "INFO", reason: str = "", **extra
         "severity": severity,
         "user": user.get("username") or extra.pop("user", "-"),
         "role": user.get("role", "-"),
-        "src_ip": get_client_ip(),
+        "src_ip": client_ip_val,
+        "srcip": client_ip_val,
+        "client_ip": client_ip_val,
         "method": request.method,
         "path": request.path[:200],
         "decision": decision,
@@ -343,6 +362,7 @@ def check_csrf():
 UPLOAD_ENDPOINTS = ("portal.post_new", "approvals.approval_new", "approvals.approval_decide", "library.file_upload", "library.form_upload", "messenger_api.send_file")
 # 첨부와 달리 상한이 따로 있는 요청: 본문을 메모리로 다 읽기 전에 413 으로 끊는다.
 ENDPOINT_LIMITS = {"messenger_api.upload_profile_photo": 10 * 1024 * 1024 + 64 * 1024,   # 사진 10MB + multipart 머리
+                   "profile.photo_upload": 10 * 1024 * 1024 + 64 * 1024,                 # 웹 프로필 사진도 같은 10MB
                    "chat.chat_send": 10 * 1024 * 1024 + 64 * 1024}                       # AI 어시스턴트 첨부 10MB(chat_attach.MAX_BYTES)
 
 
@@ -362,7 +382,6 @@ def add_headers(resp):
     resp.headers.setdefault("Content-Security-Policy", (
         "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
         "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
-                   "profile.photo_upload": 10 * 1024 * 1024 + 64 * 1024,                 # 웹 프로필 사진도 같은 10MB
     ))
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["X-Frame-Options"] = "DENY"

@@ -27,7 +27,7 @@
     </label>
     <label>역할
       <select name="role" required>
-        {% for r in roles %}<option value="{{ r }}"{% if values.get('role', 'employee') == r %} selected{% endif %}>{{ r }} ({{ titles[r] }})</option>{% endfor %}
+        {% for r in roles %}<option value="{{ r }}"{% if values.get('role', 'employee') == r %} selected{% endif %}>{{ role_labels.get(r, r) if role_labels else r }} (기본: {{ titles[r] }})</option>{% endfor %}
       </select>
     </label>
     <label>직급 (비우면 역할의 기본 직급)

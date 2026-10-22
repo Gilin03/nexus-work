@@ -26,10 +26,11 @@ DECISIONS = {"approve": "approved", "reject": "rejected"}
 MAX_STEPS = 5
 MAX_CC = 10
 # 결재선에 넣을 수 있는 역할. 아래 approver_candidates 의 SQL 과 같은 값을 유지한다.
-APPROVER_ROLES = ("manager", "admin")
+from .permissions import ROLES, ROLE_LABELS
+APPROVER_ROLES = ROLES  # 모든 사원/직원 결재선 지정 가능
 APPROVER_MESSAGES = {
     "approver_required": "결재자를 한 명 이상 선택하세요.",
-    "approver_invalid": "선택할 수 없는 결재자입니다. 팀장 또는 관리자만 지정할 수 있습니다.",
+    "approver_invalid": "선택할 수 없는 결재자입니다. 등록된 사원만 지정할 수 있습니다.",
     "approver_duplicate": "같은 결재자를 두 번 선택할 수 없습니다.",
     "approver_self": "본인을 결재자로 지정할 수 없습니다.",
 }
@@ -212,12 +213,21 @@ def pending_count(user_id) -> int:
 
 # ---------- 결재선·참조 ----------
 def approver_candidates(user):
-    return db.query_all("SELECT id, display_name, dept, role FROM users "
-                        "WHERE role IN ('manager', 'admin') AND id <> %s AND deleted_at IS NULL ORDER BY dept, display_name", (user["id"],))
+    return db.query_all(
+        "SELECT u.id, u.display_name, u.dept, u.role, e.title "
+        "FROM users u LEFT JOIN employees e ON e.user_id = u.id "
+        "WHERE u.id <> %s AND u.deleted_at IS NULL ORDER BY u.dept, u.display_name",
+        (user["id"],)
+    )
 
 
 def cc_candidates(user):
-    return db.query_all("SELECT id, display_name, dept, role FROM users WHERE id <> %s AND deleted_at IS NULL ORDER BY dept, display_name", (user["id"],))
+    return db.query_all(
+        "SELECT u.id, u.display_name, u.dept, u.role, e.title "
+        "FROM users u LEFT JOIN employees e ON e.user_id = u.id "
+        "WHERE u.id <> %s AND u.deleted_at IS NULL ORDER BY u.dept, u.display_name",
+        (user["id"],)
+    )
 
 
 def parse_approvers(form, requester):
@@ -371,7 +381,8 @@ def _form(values=None, error=None, status=200):
     return render_template("approval_form.html", error=error, candidates=approver_candidates(g.user), cc_candidates=cc_candidates(g.user),
                            max_steps=MAX_STEPS, max_cc=MAX_CC, values=values or _blank_values(),
                            form_types=FORM_TYPES, types=DOC_TYPES, urgency=URGENCY, selected=(values or {}).get("approvers", []),
-                           accounts=ACCOUNTS, pay_methods=PAY_METHODS, evidence_types=EVIDENCE, max_rows=MAX_ITEM_ROWS), status
+                           accounts=ACCOUNTS, pay_methods=PAY_METHODS, evidence_types=EVIDENCE, max_rows=MAX_ITEM_ROWS,
+                           role_labels=ROLE_LABELS), status
 
 
 def _redraft_values(src_id):

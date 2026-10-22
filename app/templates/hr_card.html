@@ -2,7 +2,12 @@
 {% block title %}{{ e.name }} 인사카드 · NEXUS WORK{% endblock %}
 {% block content %}
 <a class="crumb" href="{{ url_for('hr.card_list') }}">&larr; 인사카드 목록</a>
-<h1>인사카드</h1>
+<div class="head-actions" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.8rem;">
+  <h1 style="margin: 0;">인사카드</h1>
+  {% if can_edit %}
+  <a class="btn primary" href="{{ url_for('hr.card_edit_form', emp_id=e.id) }}">인사카드 수정</a>
+  {% endif %}
+</div>
 <div class="sheet narrow">
   <table class="facts">
     <tbody>

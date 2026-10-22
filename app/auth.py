@@ -1,3 +1,4 @@
+from .permissions import ROLE_LABELS
 """인증: 로그인·로그아웃, 세션, 실패 잠금, 비밀번호 변경.
 - 로그인 실패 메시지는 항상 같다(계정 열거 방지). 존재하지 않는 계정도 더미 해시를 검증해 응답 시간을 맞춘다.
 - 실패 횟수는 SELECT ... FOR UPDATE 로 행을 잠근 채 갱신해, 동시 요청으로 한도를 우회할 수 없다.
@@ -64,6 +65,7 @@ def load_user():
     g.user = {k: row[k] for k in ("id", "username", "role", "display_name", "dept", "title")}
     g.user["pinned"] = bool(row["pinned"])
     g.user["has_photo"] = bool(row["has_photo"])
+    g.user["role_label"] = "최고관리자" if (g.user["pinned"] and g.user["role"] == "admin") else ROLE_LABELS.get(g.user["role"], g.user["role"])
 
 
 def login_required(view):

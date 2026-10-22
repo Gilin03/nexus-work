@@ -108,7 +108,77 @@ def card_detail(emp_id):
         tenure = max(months, 0)
     balance = leave_balance(e["user_id"], today_kst().year) if e["user_id"] else None
     log_event("hr_card_view", "INFO", "ok", resource=f"hr_card:{emp_id}")
-    return render_template("hr_card.html", e=e, tenure=tenure, balance=balance, year=today_kst().year)
+    can_edit = can(g.user, "hr.cards.all")
+    return render_template("hr_card.html", e=e, tenure=tenure, balance=balance, year=today_kst().year, can_edit=can_edit)
+
+
+def _card_edit_error(e, error):
+    from .admin import dept_options
+    from .permissions import RANKS
+    return render_template("hr_card_edit.html", e=e, depts=dept_options(), ranks=RANKS, error=error), 400
+
+
+@bp.get("/cards/<int:emp_id>/edit")
+@login_required
+def card_edit_form(emp_id):
+    if not can(g.user, "hr.cards.all"):
+        log_event("authz_deny", "DENY", "insufficient_role", required="hr.cards.all")
+        return forbidden("out_of_scope", resource=f"hr_card:{emp_id}")
+    e = db.query_one("SELECT id, user_id, emp_no, name, dept, title, ext, hire_date, annual_days FROM employees WHERE id = %s", (emp_id,))
+    if not e:
+        abort(404)
+    from .admin import dept_options
+    from .permissions import RANKS
+    return render_template("hr_card_edit.html", e=e, depts=dept_options(), ranks=RANKS)
+
+
+@bp.post("/cards/<int:emp_id>/edit")
+@login_required
+def card_edit(emp_id):
+    if not can(g.user, "hr.cards.all"):
+        log_event("authz_deny", "DENY", "insufficient_role", required="hr.cards.all")
+        return forbidden("out_of_scope", resource=f"hr_card:{emp_id}")
+    e = db.query_one("SELECT id, user_id, emp_no, name, dept, title, ext, hire_date, annual_days FROM employees WHERE id = %s FOR UPDATE", (emp_id,))
+    if not e:
+        abort(404)
+    name = request.form.get("name", "").strip()
+    dept = request.form.get("dept", "").strip()
+    title = request.form.get("title", "").strip()
+    ext = request.form.get("ext", "").strip()
+    emp_no = request.form.get("emp_no", "").strip()
+    hire_date_raw = request.form.get("hire_date", "").strip()
+    annual_days_raw = request.form.get("annual_days", "15").strip()
+
+    if not name or len(name) > 64:
+        return _card_edit_error(e, "이름을 1~64자로 입력하세요.")
+    if not dept or len(dept) > 64:
+        return _card_edit_error(e, "부서를 입력하세요.")
+    from .permissions import RANKS
+    if title and title not in RANKS:
+        return _card_edit_error(e, "유효한 직급을 선택하세요.")
+
+    hire_date = None
+    if hire_date_raw:
+        try:
+            hire_date = datetime.strptime(hire_date_raw, "%Y-%m-%d").date()
+        except ValueError:
+            return _card_edit_error(e, "입사일 형식이 올바르지 않습니다 (YYYY-MM-DD).")
+    try:
+        annual_days = int(annual_days_raw)
+        if not (0 <= annual_days <= 100):
+            raise ValueError
+    except ValueError:
+        return _card_edit_error(e, "부여 연차는 0~100 사이의 숫자여야 합니다.")
+
+    db.execute(
+        "UPDATE employees SET name=%s, dept=%s, title=%s, ext=%s, emp_no=%s, hire_date=%s, annual_days=%s WHERE id=%s",
+        (name, dept, title, ext, emp_no, hire_date, annual_days, emp_id)
+    )
+    if e["user_id"]:
+        db.execute("UPDATE users SET display_name=%s, dept=%s WHERE id=%s", (name, dept, e["user_id"]))
+
+    log_event("admin_action", "ALLOW", "hr_card_edit", action="hr_card_edit", target=f"employee:{emp_id}", name=name, dept=dept, title=title)
+    return redirect(url_for("hr.card_detail", emp_id=emp_id), 303)
 
 
 # ---------- 조직도 ----------

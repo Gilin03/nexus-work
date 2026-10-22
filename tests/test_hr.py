@@ -355,3 +355,33 @@ def test_now_kst_has_no_fractional_seconds_so_checkout_right_after_checkin_works
     assert post(c, "/hr/attendance/check-out").status_code == 303
     (_, cin, cout), = attendance_rows(root, ZZ)
     assert cout >= cin
+
+
+def test_card_edit_permissions_and_update(aapp, root):
+    emp_user = "zz_emp"
+    adm = as_user(aapp, "zz_adm")
+    emp = as_user(aapp, emp_user)
+
+    eid = add_employee(root, "zz_수정대상", "A팀", user=emp_user)
+
+    # 1. 일반 사원은 수정 폼 및 수정 제출 불가 (403)
+    assert emp.get(f"/hr/cards/{eid}/edit").status_code == 403
+    assert post(emp, f"/hr/cards/{eid}/edit", name="해킹시도", dept="A팀").status_code == 403
+
+    # 2. 관리자는 수정 폼 접근 가능 (200)
+    res_form = adm.get(f"/hr/cards/{eid}/edit")
+    assert res_form.status_code == 200
+    assert "인사카드 수정" in res_form.get_data(as_text=True)
+
+    # 3. 관리자가 인사카드 수정 (이름, 내선, 연차 변경)
+    res_post = post(adm, f"/hr/cards/{eid}/edit", name="김사원수정", dept="A팀", title="대리", ext="9988", annual_days="18")
+    assert res_post.status_code == 303
+    assert res_post.headers["Location"].endswith(f"/hr/cards/{eid}")
+
+    # 4. DB 반영 확인
+    card = sql(root, "SELECT name, title, ext, annual_days FROM employees WHERE id=%s", (eid,))[0]
+    assert card == ("김사원수정", "대리", "9988", 18)
+
+    # 5. users 테이블의 display_name도 동기화 확인
+    u_name = sql(root, "SELECT display_name FROM users WHERE id=%s", (uid(root, emp_user),))[0][0]
+    assert u_name == "김사원수정"
