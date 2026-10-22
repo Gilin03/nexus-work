@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 import pymysql
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 
 ROOT = Path(__file__).resolve().parent.parent
 ENV = ROOT / ".env"
@@ -33,6 +33,12 @@ def grant_statements(db, user=USER, host=HOST):
     return [
         f"GRANT SELECT ({', '.join(SELECT_COLS)}) ON `{db}`.users TO {who}",
         f"GRANT UPDATE ({', '.join(UPDATE_COLS)}) ON `{db}`.users TO {who}",
+        # Incident/Ticket workflow permissions are scoped to these two tables only.
+        f"GRANT SELECT, INSERT ON `{db}`.security_incident_alerts TO {who}",
+        f"GRANT UPDATE (ticket_id) ON `{db}`.security_incident_alerts TO {who}",
+        f"GRANT SELECT, INSERT ON `{db}`.security_incident_tickets TO {who}",
+        f"GRANT UPDATE (status, ticket_type, type_rank, event_count, rule_ids, user_names, last_seen, latest_event, resolution, closed_at, note, responses) ON `{db}`.security_incident_tickets TO {who}",
+        f"GRANT SELECT, INSERT, UPDATE ON `{db}`.security_discord_rate_limit TO {who}",
     ]
 
 
@@ -40,8 +46,9 @@ def ensure_password(rotate=False):
     """N8N_DB_PASSWORD 를 돌려준다. 없거나 --rotate 면 새로 만들어 .env 에 적는다(값은 출력하지 않는다)."""
     text = ENV.read_text(encoding="utf-8") if ENV.exists() else ""
     m = re.search(r"^N8N_DB_PASSWORD=(.+)$", text, re.M)
-    if m and not rotate:
-        return m.group(1).strip(), False
+    parsed = dotenv_values(ENV).get("N8N_DB_PASSWORD") if ENV.exists() else None
+    if parsed and not rotate:
+        return parsed, False
     pw = secrets.token_urlsafe(24)
     if m:
         text = text[:m.start()] + f"N8N_DB_PASSWORD={pw}" + text[m.end():]

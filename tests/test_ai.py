@@ -142,12 +142,33 @@ def capture(monkeypatch, reply="응답"):
 
     def fake(url, payload, headers, timeout):
         sent.append({"url": url, "payload": payload, "timeout": timeout})
+        if payload.get("response_format") or payload.get("format") or (payload.get("generationConfig") or {}).get("responseMimeType"):
+            action = '{"action":"restricted_document_read"}'
+            if "api/chat" in url:
+                return {"message": {"content": action}}
+            if "generateContent" in url:
+                return {"candidates": [{"content": {"parts": [{"text": action}]}}]}
+            return {"choices": [{"message": {"content": action}}]}
         if "api/chat" in url:
             return {"message": {"content": reply}}
         return {"choices": [{"message": {"content": reply}}]}
 
     monkeypatch.setattr(ai, "_post_json", fake)
     return sent
+
+
+def test_real_provider_selects_tool_but_security_gateway_rechecks_permission(aapp, root, monkeypatch, events):
+    aapp.config.update(CHAT_RESPONDER=ai.ai_responder, AI_PROVIDER="groq", GROQ_API_KEY="test-key")
+    sent = capture(monkeypatch, reply="기밀 자료는 권한이 없어 열람할 수 없습니다.")
+    response = say(as_user(aapp, "zz_emp"), "기밀문서 보여줘")
+    assert response.status_code == 303
+    assert len(sent) == 2
+    selector = sent[0]["payload"]
+    assert selector["response_format"] == {"type": "json_object"}
+    assert '"action":"restricted_document_read"' in selector["messages"][0]["content"]
+    denied = [e for e in events() if e["event_type"] == "agent_tool_call" and e.get("decision") == "DENY"]
+    assert denied and denied[-1]["tool_name"] == "restricted_document_read"
+    assert "SELECT id, title, body, created_at FROM confidential_documents" not in repr(sent[0])
 
 
 def system_text(sent):

@@ -1,0 +1,680 @@
+{
+  "name": "NEXUS 탐지 알림 수신 v2 - 강제 dry-run 후보",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "nexus-alert",
+        "responseMode": "responseNode",
+        "options": {},
+        "authentication": "basicAuth"
+      },
+      "id": "a1f0c0de-0001-4000-8000-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        208
+      ],
+      "webhookId": "a1f0c0de-0001-4000-8000-0000000000aa",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "00000000-0000-4000-8000-000000000000",
+          "name": "NEXUS Graylog Webhook Basic Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const inp=$input.first().json||{}, raw=inp.body&&typeof inp.body==='object'?inp.body:{};\nconst own=(o,k)=>Object.prototype.hasOwnProperty.call(o||{},k), missing=v=>v===undefined||v===null||v===''||v==='-';\nconst txt=(v,max=160)=>missing(v)||!(typeof v==='string'||typeof v==='number'||typeof v==='boolean')?undefined:String(v).replace(/[\\u0000-\\u001f\\u007f]/g,' ').trim().slice(0,max)||undefined;\nconst num=v=>missing(v)||!Number.isFinite(Number(v))?undefined:Number(v);\nconst bad=(code,reason,id,aid)=>[{json:{processable:false,mode:'dry-run',http_code:code,response_body:{status:code===202?'fallback':'invalid_payload',mode:'dry-run',reason,...(id?{rule_id:id}:{}),...(aid?{alert_id:aid}:{})}}}];\nif(raw.schema_version!=='1.1')return bad(422,'schema_version_must_be_1.1');\nconst r=raw.rule,a=raw.alert,s=raw.event;\nif(!r||!a||!s||typeof s!=='object'||Array.isArray(s))return bad(422,'required_envelope_object_missing');\nconst id=txt(r.id,8), stable=txt(r.stable_name,80), title=txt(r.display_name,160), sev=txt(r.severity,16), level=txt(raw.action_level,16), aid=txt(a.id,160), at=txt(a.timestamp,64), pri=a.priority;\nif(!id||!stable||!title||!sev||!level||!aid||!at||!Number.isInteger(pri))return bad(422,'required_envelope_field_missing',id,aid);\nif(!Number.isFinite(Date.parse(at)))return bad(422,'alert_timestamp_invalid',id,aid);\nif(![1,2,3].includes(pri))return bad(422,'alert_priority_out_of_graylog_6_1_range',id,aid);\nconst names={R1:'ACCOUNT_COMPROMISE',R2:'DIRECT_PROMPT_INJECTION_BLOCKED',R5:'ACCOUNT_SPRAY',R6:'POST_LOCK_RETRY',R7:'OFF_HOURS_LOGIN_SUCCESS',R8:'NOT_FOUND_SCAN',R9:'ADMIN_PATH_ACCESS_DENIED',R10:'DIRECT_CONFIDENTIAL_ACCESS_DENIED'};\nconst levels={R1:'contain',R2:'alert',R5:'alert',R6:'alert',R7:'observe',R8:'alert',R9:'alert',R10:'alert'};\nconst et=txt(s.event_type,80), expected={R1:et==='account_compromise_suspected'?'high':et==='account_locked'?'medium':undefined,R2:'high',R5:'medium',R6:'high',R7:'info',R8:'info',R9:'medium',R10:'medium'};\nif(!names[id])return bad(202,'rule_not_implemented_or_unsupported',id,aid);\nif(stable!==names[id])return bad(422,'rule_stable_name_mismatch',id,aid);\nif(level!==levels[id])return bad(422,'action_level_missing_or_mismatched',id,aid);\nif(!expected[id]||sev!==expected[id])return bad(422,'rule_severity_missing_or_mismatched',id,aid);\nconst fields=['event_type','injection_type','src_ip','user','decision','request_id','session_id','tool_name','resource_class','source_type','trigger_source','resource_id','trigger_resource_id','pattern_id','reason','severity','role','path','resource','required','count','window_seconds','failed_attempts','lock_request_id','trigger_event_type'];\nconst ev={}; for(const k of fields){if(!own(s,k))continue;let v=s[k];if(['count','window_seconds','failed_attempts'].includes(k)){v=num(v);if(v!==undefined)ev[k]=v;}else{v=txt(v,k==='path'||k==='resource'?200:160);if(v!==undefined)ev[k]=k==='decision'?v.toUpperCase():v;}}\nconst evidenceKeys=new Set(['event_count','distinct_users','retry_count','denied_calls','failed_attempts','success_after_failures','window_seconds','correlation_window_seconds','after_event','prior_event_type','source_resource_id','lock_request_id','trigger_event_type','timezone','local_time']);\nif(s.evidence&&typeof s.evidence==='object'&&!Array.isArray(s.evidence)){const x={};for(const [k,v] of Object.entries(s.evidence)){if(evidenceKeys.has(k)&&(typeof v==='string'||typeof v==='number'||typeof v==='boolean')&&!missing(v))x[k]=typeof v==='string'?txt(v,160):v;}if(Object.keys(x).length)ev.evidence=x;}\nconst req=k=>!!ev[k], dec=ev.decision;\nif(id==='R1'){if(!et||!req('user')||!req('src_ip')||!req('request_id'))return bad(422,'r1_required_event_field_missing',id,aid);if(et==='account_compromise_suspected'){if(dec!=='WARN'||ev.failed_attempts<3||ev.window_seconds!==300)return bad(422,'r1_compromise_evidence_mismatch',id,aid);}else if(et==='account_locked'){if(!['BLOCK','DENY'].includes(dec))return bad(422,'r1_lock_result_decision_invalid',id,aid);}else return bad(422,'r1_event_type_unsupported',id,aid);}\nconst r2Patterns=new Set(['ignore_previous_instructions','reveal_hidden_prompt','policy_bypass_protected_data']);if(id==='R2'&&(et!=='prompt_injection_detected'||ev.injection_type!=='direct'||dec!=='DENY'||!r2Patterns.has(ev.pattern_id)||!req('user')||!req('src_ip')||!req('request_id')||!req('session_id')))return bad(422,'r2_direct_deny_evidence_missing',id,aid);\nif(id==='R5'&&!req('src_ip'))return bad(422,'r5_src_ip_missing',id,aid);\nif(id==='R6'&&(!req('user')||!req('src_ip')||!req('lock_request_id')||!req('trigger_event_type')||!Number.isInteger(ev.count)||ev.count<3||ev.window_seconds!==300))return bad(422,'r6_actual_count_or_lock_evidence_missing',id,aid);\nif(id==='R7'&&(!req('user')||!req('src_ip')))return bad(422,'r7_identity_field_missing',id,aid);\nif(id==='R8'&&!req('src_ip'))return bad(422,'r8_src_ip_missing',id,aid);\nif(id==='R9'&&(!req('user')||!req('path')))return bad(422,'r9_user_or_path_missing',id,aid);\nif(id==='R10'&&(!req('user')||!req('path')||!req('resource')))return bad(422,'r10_user_path_or_resource_missing',id,aid);\nconst user=ev.user, ip=ev.src_ip, key=ip?'ip:'+ip:(user?'user:'+user:'');\nif(!key)return bad(202,'no_safe_ticket_key',id,aid);\nlet group='alert_ticket', planned=['alert','ticket','discord_notification_suppressed'];\nif(id==='R1'&&et==='account_compromise_suspected')group='r1_compromise';\nelse if(id==='R1'&&et==='account_locked'){group='r1_already_locked';planned=['record_existing_lock_result','ticket'];}\nelse if(id==='R7'){group='observe_ticket';planned=['observe','ticket','discord_notification_suppressed'];}\nconst sd=$getWorkflowStaticData('global');sd.seen=sd.seen||{};\nif(sd.seen[aid])return [{json:{processable:false,duplicate:true,mode:'dry-run',http_code:202,response_body:{status:'duplicate',mode:'dry-run',rule_id:id,alert_id:aid}}}];\nsd.seen[aid]=Date.now();const ks=Object.keys(sd.seen);if(ks.length>500)for(const k of ks.sort((x,y)=>sd.seen[x]-sd.seen[y]).slice(0,ks.length-500))delete sd.seen[k];\nreturn [{json:{processable:true,duplicate:false,mode:'dry-run',rule:{id,stable_name:stable,display_name:title,severity:sev},rule_id:id,action_level:level,alert:{id:aid,timestamp:at,priority:pri},alert_id:aid,event:ev,src_ip:ip,user,ticket_key:key,response_group:group,planned_actions:planned,decision_present:!!dec,external_effects_suppressed:true}}];"
+      },
+      "id": "554a1449-e76b-4a24-b7d6-54c2c35d04eb",
+      "name": "정규화·대응 계획",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "payload-valid",
+              "leftValue": "={{ $json.processable }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "3acaad2c-b8b9-4d2a-a308-b4a78be73b27",
+      "name": "계약 검증 통과?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        480,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d=$input.first().json,sd=$getWorkflowStaticData('global');sd.tickets=sd.tickets||{};sd.history=sd.history||[];sd.seq=sd.seq||0;const key=d.ticket_key;let t=sd.tickets[key],fresh=false;if(t&&t.status==='closed'){sd.history.unshift(t);sd.history=sd.history.slice(0,200);t=null;}if(!t){sd.seq++;fresh=true;t={id:'NX-'+String(sd.seq).padStart(4,'0'),ticket_key:key,src_ip:d.event.src_ip||null,users:[],rules:[],alert_count:0,first_alert_at:d.alert.timestamp,last_alert_at:d.alert.timestamp,status:'open',responses:[]};}if(d.user&&!t.users.includes(d.user))t.users.push(d.user);if(!t.rules.includes(d.rule_id))t.rules.push(d.rule_id);t.alert_count=(Number(t.alert_count)||0)+1;t.ticket_type=d.rule_id==='R1'&&d.event.event_type==='account_locked'?'잠금 결과 기록':'보안 경보';t.last_alert_at=d.alert.timestamp;t.latest={alert_id:d.alert.id,rule:d.rule,event:d.event,action_level:d.action_level,priority:d.alert.priority};t.planned_actions=d.planned_actions;t.external_effects_suppressed=true;sd.tickets[key]=t;return [{json:{...d,ticket_id:t.id,ticket_is_new:fresh,ticket_alert_count:t.alert_count}}];"
+      },
+      "id": "cb8dcd09-be93-4533-a5b6-9dc47af2552c",
+      "name": "티켓 기록(출발지별)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "dupe",
+              "leftValue": "={{ $json.duplicate }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "e7363d14-3928-4167-8ee2-81428213e318",
+      "name": "중복 alert.id?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        960,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "rule-R1",
+                    "leftValue": "={{ $json.rule_id }}",
+                    "rightValue": "R1",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "R1"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "rule-R2",
+                    "leftValue": "={{ $json.rule_id }}",
+                    "rightValue": "R2",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "R2"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "rule-R5",
+                    "leftValue": "={{ $json.rule_id }}",
+                    "rightValue": "R5",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "R5"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "rule-R6",
+                    "leftValue": "={{ $json.rule_id }}",
+                    "rightValue": "R6",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "R6"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "rule-R7",
+                    "leftValue": "={{ $json.rule_id }}",
+                    "rightValue": "R7",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "R7"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "rule-R8",
+                    "leftValue": "={{ $json.rule_id }}",
+                    "rightValue": "R8",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "R8"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "rule-R9",
+                    "leftValue": "={{ $json.rule_id }}",
+                    "rightValue": "R9",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "R9"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "rule-R10",
+                    "leftValue": "={{ $json.rule_id }}",
+                    "rightValue": "R10",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "R10"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "id": "5ea02d36-fef0-4ea0-b873-201ccf081b23",
+      "name": "rule.id 분기",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1200,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.response_body || {status:\"fallback\",mode:\"dry-run\",reason:\"invalid_or_unsupported\"}) }}",
+        "options": {
+          "responseCode": "={{ $json.http_code || 422 }}"
+        }
+      },
+      "id": "1c131027-5d6e-47f0-92c6-49d6245bda04",
+      "name": "안전 fallback 응답",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        720,
+        448
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({status:\"duplicate\",mode:\"dry-run\",rule_id:$json.rule_id,alert_id:$json.alert_id}) }}",
+        "options": {
+          "responseCode": 202
+        }
+      },
+      "id": "68456d38-49ee-480b-b86f-160fc81bfde1",
+      "name": "중복 수락 응답",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1200,
+        432
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({status:\"accepted\",mode:\"dry-run\",rule_id:$json.rule_id,alert_id:$json.alert_id,ticket_id:$json.ticket_id,db_update:false,discord_sent:false,planned_actions:$json.planned_actions}) }}",
+        "options": {
+          "responseCode": 202
+        }
+      },
+      "id": "fe6864e0-5958-4bd7-b192-bae57bf7a2a1",
+      "name": "dry-run 수락 응답",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1480,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "path": "nexus-tickets",
+        "responseMode": "responseNode",
+        "options": {},
+        "authentication": "basicAuth",
+        "httpMethod": "GET"
+      },
+      "id": "a1f0c0de-0016-4000-8000-000000000016",
+      "name": "상황판 조회(GET)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        1040
+      ],
+      "webhookId": "a1f0c0de-0016-4000-8000-0000000000bb",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "00000000-0000-4000-8000-000000000000",
+          "name": "NEXUS Graylog Webhook Basic Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const sd=$getWorkflowStaticData('global');sd.tickets=sd.tickets||{};sd.history=sd.history||[];const all=[...Object.values(sd.tickets),...sd.history].sort((a,b)=>String(a.id).localeCompare(String(b.id))),open=all.filter(t=>t.status==='open'),by_type={};for(const t of open){const k=t.ticket_type||'보안 경보';by_type[k]=(by_type[k]||0)+1;}return [{json:{http:200,body:{generated_at:new Date().toISOString(),summary:{open:open.length,closed:all.length-open.length,by_type},tickets:all,whitelist:Object.entries(sd.whitelist||{}).map(([ip,v])=>({ip,source:'상황판',...v}))}}}];"
+      },
+      "id": "7b64905d-4c5f-4157-ab43-f0839ce0bd51",
+      "name": "티켓 목록 만들기",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        1040
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.http }}"
+        }
+      },
+      "id": "c950fe69-261c-4280-9830-a9fa6a637863",
+      "name": "응답(티켓 목록)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        480,
+        1040
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "nexus-ticket-action",
+        "responseMode": "responseNode",
+        "options": {},
+        "authentication": "basicAuth"
+      },
+      "id": "a1f0c0de-0019-4000-8000-000000000019",
+      "name": "티켓 처리 요청(POST)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        1248
+      ],
+      "webhookId": "a1f0c0de-0019-4000-8000-0000000000cc",
+      "credentials": {
+        "httpBasicAuth": {
+          "id": "00000000-0000-4000-8000-000000000000",
+          "name": "NEXUS Graylog Webhook Basic Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const sd=$getWorkflowStaticData('global');sd.tickets=sd.tickets||{};sd.history=sd.history||[];sd.whitelist=sd.whitelist||{};sd.seq=sd.seq||0;const inp=$input.first().json||{},b=inp.body&&typeof inp.body==='object'?inp.body:{},now=new Date().toISOString(),clean=(v,n=300)=>String(v||'').replace(/[\\u0000-\\u001f\\u007f]/g,' ').trim().slice(0,n),res=(http,body)=>[{json:{http,body}}],ipOk=x=>/^(\\d{1,3}\\.){3}\\d{1,3}$/.test(String(x||'')),userOk=x=>/^[A-Za-z][A-Za-z0-9._-]{0,49}$/.test(String(x||'')),all=Object.values(sd.tickets),find=id=>all.find(t=>t.id===id),add=(t,r)=>{t.responses=(t.responses||[]).concat([r]).slice(-30);};\nif(b.action==='close'||b.action==='false_positive'){const t=find(b.ticket_id);if(!t)return res(404,{status:'not_found'});if(t.status==='closed')return res(409,{status:'already_closed'});t.status='closed';t.resolution=b.action==='false_positive'?'오탐':'처리 완료';t.closed_at=now;t.note=clean(b.note,500);if(b.action==='false_positive'&&b.whitelist===true&&ipOk(t.src_ip))sd.whitelist[t.src_ip]={added_at:now,reason:'오탐 '+t.id};return res(200,{status:'ok',mode:'dry-run',ticket:t});}\nif(b.action==='request_release'){const u=clean(b.user,50),linked=b.ticket_id?find(b.ticket_id):null;if(!userOk(u))return res(400,{status:'bad_user'});if(b.ticket_id&&!linked)return res(404,{status:'not_found'});sd.seq++;const key='request:NX-'+String(sd.seq).padStart(4,'0'),t={id:'NX-'+String(sd.seq).padStart(4,'0'),ticket_key:key,src_ip:linked?linked.src_ip:null,ticket_type:'잠금 해제 요청',rules:[],users:[u],user:u,alert_count:1,first_alert_at:now,last_alert_at:now,status:'open',linked_ticket:linked?linked.id:null,reason:clean(b.reason,300),responses:[]};sd.tickets[key]=t;return res(200,{status:'ok',mode:'dry-run',ticket:t});}\nif(b.action==='lock'||b.action==='release'){const t=find(b.ticket_id);if(!t)return res(404,{status:'not_found'});const u=clean(b.user||t.user||(t.users&&t.users.length===1?t.users[0]:''),50);if(!userOk(u))return res(400,{status:'bad_user'});if(![...(t.users||[]),t.user].includes(u))return res(400,{status:'user_not_in_ticket'});const r={time:now,step:b.action==='release'?'잠금 해제 요청':'잠금 요청',user:u,mode:'dry-run',status:'dry-run',detail:'workflow에 NEXUS DB UPDATE 경로가 없음'};add(t,r);return res(200,{status:'ok',mode:'dry-run',result:r,ticket:t});}\nif(b.action==='whitelist_add'){if(!ipOk(b.ip))return res(400,{status:'bad_ip'});sd.whitelist[b.ip]={added_at:now,reason:clean(b.note||'수동 추가',200)};return res(200,{status:'ok',mode:'dry-run',note:'workflow ticket state에만 기록'});}\nif(b.action==='whitelist_remove'){if(!sd.whitelist[b.ip])return res(404,{status:'not_found'});delete sd.whitelist[b.ip];return res(200,{status:'ok',mode:'dry-run',note:'workflow ticket state에서만 제거'});}\nreturn res(400,{status:'bad_action',allowed:['close','false_positive','request_release','lock','release','whitelist_add','whitelist_remove']});"
+      },
+      "id": "7951a3e6-02f9-4645-9156-5bd2c4da4891",
+      "name": "티켓 처리·화이트리스트",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        1248
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.http }}"
+        }
+      },
+      "id": "b9b89c97-2846-40d8-a5a7-591809ec371e",
+      "name": "응답(처리 결과)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        480,
+        1248
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "정규화·대응 계획",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "정규화·대응 계획": {
+      "main": [
+        [
+          {
+            "node": "계약 검증 통과?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "계약 검증 통과?": {
+      "main": [
+        [
+          {
+            "node": "티켓 기록(출발지별)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "안전 fallback 응답",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "티켓 기록(출발지별)": {
+      "main": [
+        [
+          {
+            "node": "중복 alert.id?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "중복 alert.id?": {
+      "main": [
+        [
+          {
+            "node": "중복 수락 응답",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "rule.id 분기",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "rule.id 분기": {
+      "main": [
+        [
+          {
+            "node": "dry-run 수락 응답",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "dry-run 수락 응답",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "dry-run 수락 응답",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "dry-run 수락 응답",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "dry-run 수락 응답",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "dry-run 수락 응답",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "dry-run 수락 응답",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "dry-run 수락 응답",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "안전 fallback 응답",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "상황판 조회(GET)": {
+      "main": [
+        [
+          {
+            "node": "티켓 목록 만들기",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "티켓 목록 만들기": {
+      "main": [
+        [
+          {
+            "node": "응답(티켓 목록)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "티켓 처리 요청(POST)": {
+      "main": [
+        [
+          {
+            "node": "티켓 처리·화이트리스트",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "티켓 처리·화이트리스트": {
+      "main": [
+        [
+          {
+            "node": "응답(처리 결과)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  }
+}
