@@ -188,3 +188,8 @@ def test_get_client_ip_ignores_forwarded_for_from_untrusted_ip(app):
     with app.test_request_context("/", environ_base={"REMOTE_ADDR": "192.168.3.99"}, headers={"X-Forwarded-For": "10.0.0.1"}):
         from app.security import get_client_ip
         assert get_client_ip() == "192.168.3.99"
+
+def test_get_client_ip_with_x_real_ip(app):
+    with app.test_request_context('/', environ_base={'REMOTE_ADDR': '192.168.3.10'}, headers={'X-Real-IP': '192.168.7.77'}):
+        from app.security import get_client_ip
+        assert get_client_ip() == '192.168.7.77'

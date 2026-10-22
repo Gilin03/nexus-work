@@ -38,7 +38,7 @@ def get_client_ip() -> str:
     """클라이언트 실제 IP 확인.
     
     신뢰할 수 있는 프록시(기본: 127.0.0.1, 192.168.3.10 pfSense)를 거쳐 온 경우에만
-    X-Forwarded-For 헤더의 최초 클라이언트 IP를 채택하고, 그 외에는 소켓 연결 IP(remote_addr)를 반환한다.
+    X-Forwarded-For 또는 X-Real-IP 헤더의 최초 클라이언트 IP를 채택하고, 그 외에는 소켓 연결 IP(remote_addr)를 반환한다.
     """
     remote = request.remote_addr or "-"
     trusted = {"127.0.0.1", "192.168.3.10", "::1"}
@@ -51,6 +51,9 @@ def get_client_ip() -> str:
             first_ip = forwarded_for.split(",")[0].strip()
             if first_ip:
                 return first_ip
+        real_ip = request.headers.get("X-Real-IP", "").strip()
+        if real_ip:
+            return real_ip
     return remote
 
 

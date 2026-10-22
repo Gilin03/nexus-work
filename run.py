@@ -122,6 +122,9 @@ def main():
         print(f"==========================================================")
 
         # 소켓 통신 보호 미들웨어 적용 후 서빙
+        # clear_untrusted_proxy_headers=False: pfSense(192.168.3.10) WAF/프록시가 전달하는
+        # X-Forwarded-For 및 X-Real-IP 헤더를 보존하여 app.security.get_client_ip()에서
+        # 클라이언트 실제 IP(예: 192.168.7.77)를 정확히 판별할 수 있도록 허용합니다.
         served_app = SafeSocketIOMiddleware(app.wsgi_app)
 
         waitress.serve(
@@ -131,6 +134,7 @@ def main():
             threads=args.threads,
             channel_timeout=120,
             cleanup_interval=30,
+            clear_untrusted_proxy_headers=False,
             _quiet=False,
         )
 
