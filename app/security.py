@@ -288,6 +288,11 @@ def log_event(event_type: str, decision: str = "INFO", reason: str = "", **extra
         record[k] = v if isinstance(v, (int, float, bool)) else str(v)[:200]
     _logger.info(json.dumps(record, ensure_ascii=False))
     try:
+        from .audit import broadcast_audit_event
+        broadcast_audit_event(record)
+    except Exception:
+        pass
+    try:
         from .auth_events import collect_auth_events
 
         for derived in collect_auth_events(record):

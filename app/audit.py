@@ -3,6 +3,8 @@
 - 값은 화면에서 Jinja 가 이스케이프한다. 비밀번호·토큰·대화 원문은 애초에 기록되지 않는다(security.log_event 설계).
 - 필터 값은 허용 형식만 받는다(호출하는 쪽에서 검증하고, 여기서는 일치 비교만 한다)."""
 import json
+import queue
+import threading
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -209,3 +211,44 @@ def csv_cell(value):
     """CSV 수식 주입(= + - @ 로 시작하는 칸이 엑셀에서 수식으로 실행되는 것)을 막는다: 앞에 작은따옴표를 붙인다."""
     text = str(value)
     return "'" + text if text[:1] in ("=", "+", "-", "@", "\t", "\r") else text
+
+
+# =====================================================================================
+# 실시간 감사 로그 SSE (Server-Sent Events) 스트리밍 브로드캐스터
+# =====================================================================================
+_audit_subscribers = set()
+_audit_subscribers_lock = threading.Lock()
+
+
+def subscribe_audit_events():
+    """새 SSE 클라이언트 큐 생성 및 등록."""
+    q = queue.Queue(maxsize=100)
+    with _audit_subscribers_lock:
+        _audit_subscribers.add(q)
+    return q
+
+
+def unsubscribe_audit_events(q):
+    """SSE 클라이언트 큐 해제."""
+    with _audit_subscribers_lock:
+        _audit_subscribers.discard(q)
+
+
+def broadcast_audit_event(record: dict):
+    """새로 발생한 보안 이벤트를 접속 중인 모든 SSE 클라이언트 큐로 전달."""
+    with _audit_subscribers_lock:
+        if not _audit_subscribers:
+            return
+        # 화면 테이블 및 상세 패널에 필요한 표준 포맷으로 정리
+        row = _shape(record)
+        row["raw"] = json.dumps(record, ensure_ascii=False, indent=2)[:2000]
+
+        dead = []
+        for q in _audit_subscribers:
+            try:
+                q.put_nowait(row)
+            except queue.Full:
+                dead.append(q)
+        for q in dead:
+            _audit_subscribers.discard(q)
+

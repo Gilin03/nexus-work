@@ -68,7 +68,7 @@ def parse_args(argv=None, environ=os.environ):
     ap = argparse.ArgumentParser(description="NEXUS WORK 서버 구동기")
     ap.add_argument("--host", default=environ.get("APP_HOST", "127.0.0.1"), help="바인딩 호스트 (기본: .env APP_HOST 또는 127.0.0.1)")
     ap.add_argument("--port", type=int, default=int(environ.get("APP_PORT", "5070")), help="바인딩 포트 (기본: 5070)")
-    ap.add_argument("--threads", type=int, default=8, help="프로덕션 WSGI 작업 스레드 수 (기본: 8)")
+    ap.add_argument("--threads", type=int, default=16, help="프로덕션 WSGI 작업 스레드 수 (기본: 16)")
     ap.add_argument("--dev", action="store_true", help="Werkzeug 개발 서버로 구동 (미지정 시 Waitress 프로덕션 구동)")
     ap.add_argument("--prod", action="store_true", help="명시적 프로덕션 모드 강제")
     return ap.parse_args(argv)

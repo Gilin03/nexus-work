@@ -177,8 +177,19 @@
 
 <div class="sheet audit-log-sheet">
   <div class="audit-log-head">
-    <h2>실시간 감사 로그 콘솔</h2>
-    <span class="hint">조건에 맞는 이벤트 {{ matched_n }}건{% if capped %}(최신 {{ 2000 }}건까지만 표시·내보내기){% endif %} 중 {{ events | length }}건 표시</span>
+    <div class="audit-head-left">
+      <h2>실시간 감사 로그 콘솔</h2>
+      <div class="audit-live-badge-wrap" id="audit-live-status" title="실시간 SSE 스트리밍 상태">
+        <span class="live-pulse-dot" id="live-dot" aria-hidden="true"></span>
+        <span class="live-status-text" id="live-text">실시간 감시 준비 중...</span>
+      </div>
+    </div>
+    <div class="audit-head-controls">
+      <button type="button" class="btn small live-toggle-btn" id="live-toggle-btn" title="실시간 자동 스트리밍 켜기/일시정지">
+        <span id="live-toggle-label">⏸ 일시정지</span>
+      </button>
+      <span class="hint" id="audit-counter-hint">조건에 맞는 이벤트 {{ matched_n }}건{% if capped %}(최신 {{ 2000 }}건까지만 표시·내보내기){% endif %} 중 {{ events | length }}건 표시</span>
+    </div>
   </div>
   {% if events %}
   <div class="scroll">
@@ -242,6 +253,7 @@
       <div class="audit-detail-title-wrap">
         <span class="detail-badge-label">상세 로그</span>
         <span id="detail-panel-badge" class="pill"></span>
+        <span id="detail-panel-live-tag" class="detail-live-tag" hidden>🔴 LIVE 스트리밍</span>
         <h3 id="detail-panel-title">보안 이벤트 상세</h3>
       </div>
       <button type="button" class="btn-detail-close" id="detail-panel-close-btn" aria-label="상세 로그 닫기">닫기 ×</button>

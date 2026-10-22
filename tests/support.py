@@ -23,7 +23,10 @@ def connect_root():
 def cleanup(con):
     with con.cursor() as cur:
         cur.execute("DELETE FROM security_auth_events WHERE username LIKE 'zz\\_%'")
-        cur.execute("DELETE FROM security_ai_tool_denials WHERE user_id IN (SELECT id FROM users WHERE username LIKE 'zz\\_%')")
+        try:
+            cur.execute("DELETE FROM security_ai_tool_denials WHERE user_id IN (SELECT id FROM users WHERE username LIKE 'zz\\_%')")
+        except Exception:
+            pass
         # 업무·자료: 외래 키 순서대로(하위 폴더가 나중에 만들어지므로 id 역순으로 지운다)
         cur.execute(f"DELETE FROM lib_files WHERE uploaded_by IN {_ZZ} OR deleted_by IN {_ZZ}")
         cur.execute(f"DELETE FROM lib_folders WHERE created_by IN {_ZZ} ORDER BY id DESC")

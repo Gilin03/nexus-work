@@ -15,6 +15,8 @@
 - 직급(사원·대리·과장·팀장·관리자)은 역할 안의 세부 단계이고 사용자 관리에서 바꾼다(인사발령). 역할이 바뀌면 직급도 그 역할에 맞게 함께 바뀐다.
 - 보안 대시보드(감사 로그)와 CSV 내보내기는 보안관제팀 소속과 시스템관리자만 쓴다(permissions.py 의 security.dashboard). 일반 관리자는 열 수 없다."""
 import csv
+import json
+import queue
 import io
 import re
 import secrets
@@ -530,6 +532,39 @@ def audit_export():
     name = "security-events-" + datetime.now(audit.KST).strftime("%Y%m%d-%H%M") + ".csv"
     return Response("\ufeff" + out.getvalue(), mimetype="text/csv",
                     headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+
+
+@bp.get("/audit/stream")
+@permission_required("security.dashboard")
+def audit_stream():
+    """실시간 보안 감사 이벤트 SSE 스트림."""
+    q = audit.subscribe_audit_events()
+
+    def generate():
+        try:
+            yield b": connected\n\n"
+            while True:
+                try:
+                    event_data = q.get(timeout=15.0)
+                    payload = json.dumps(event_data, ensure_ascii=False)
+                    yield f"data: {payload}\n\n".encode("utf-8")
+                except queue.Empty:
+                    yield b": keepalive\n\n"
+        except GeneratorExit:
+            pass
+        finally:
+            audit.unsubscribe_audit_events(q)
+
+    return Response(
+        generate(),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # ---------- 권한 현황 ----------
