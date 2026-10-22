@@ -7,6 +7,7 @@ CREATE USER IF NOT EXISTS 'nexus_conf'@'%' IDENTIFIED BY '__CONF_PW__';
 -- 아이디·이름·부서를 앱 계정이 바꿀 수 없다. 사용자 삭제는 행을 지우지 않고 deleted_at·deleted_by 로 표시한다(DELETE 권한 없음).
 GRANT SELECT, INSERT, DELETE ON `__DB__`.security_auth_events TO 'nexus_app'@'%';
 GRANT UPDATE (r6_emitted_at, r1_emitted_at) ON `__DB__`.security_auth_events TO 'nexus_app'@'%';
+GRANT SELECT, INSERT, DELETE ON `__DB__`.security_ai_tool_denials TO 'nexus_app'@'%';
 GRANT SELECT, INSERT         ON `__DB__`.users         TO 'nexus_app'@'%';
 GRANT UPDATE (password_hash, failed_count, locked_until, role, session_version, deleted_at, deleted_by, dept) ON `__DB__`.users TO 'nexus_app'@'%';
 -- 직원: 조회와 등록(관리자 화면의 계정 등록이 인사카드를 함께 만든다)만. 수정·삭제는 불가(사번·입사일·연차 보호).

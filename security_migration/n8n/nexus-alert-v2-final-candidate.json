@@ -1,0 +1,1341 @@
+{
+  "name": "NEXUS 탐지 알림 수신 v2 - 최종 후보 (DRY-RUN)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "nexus-alert",
+        "responseMode": "responseNode",
+        "options": {},
+        "authentication": "headerAuth"
+      },
+      "id": "a1f0c0de-0001-4000-8000-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        208
+      ],
+      "webhookId": "a1f0c0de-0001-4000-8000-0000000000aa",
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "NEXUS x-webhook-token (재연결 필요)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "schema-1-1-required-envelope",
+              "leftValue": "={{ !!$json.contract_valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1f0c0de-0002-4000-8000-000000000002",
+      "name": "schema_version·필수 식별자 검증",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        448,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const inp = $input.first().json || {};\nconst raw = inp.body || {};\nconst srcEvent = raw.event || {};\nconst sd = $getWorkflowStaticData('global');\nconst miss = v => v === undefined || v === null || v === '' || v === '-';\nconst text = (v, max = 200) => {\n  if (miss(v) || !['string', 'number', 'boolean'].includes(typeof v)) return '';\n  return String(v).replace(/[\\u0000-\\u001f\\u007f]/g, ' ').trim().slice(0, max);\n};\nconst num = v => Number.isFinite(Number(v)) ? Number(v) : undefined;\nconst rules = {\n  R1: { stable: 'ACCOUNT_COMPROMISE', action: 'contain', events: ['account_compromise_suspected', 'account_locked'] },\n  R2: { stable: 'DIRECT_PROMPT_INJECTION_BLOCKED', action: 'alert', events: ['prompt_injection_detected'] },\n  R3: { stable: 'AI_TOOL_PERMISSION_DENIED', action: 'contain', events: ['agent_tool_call'] },\n  R4: { stable: 'UNEXPECTED_INTERNAL_API_CALL', action: 'contain', events: ['internal_api_call'] },\n  R5: { stable: 'ACCOUNT_SPRAY', action: 'alert', events: ['login_failure'] },\n  R6: { stable: 'POST_LOCK_RETRY', action: 'alert', events: ['post_lock_retry_detected'] },\n  R7: { stable: 'OFF_HOURS_LOGIN_SUCCESS', action: 'observe', events: ['login_success'] },\n  R8: { stable: 'NOT_FOUND_SCAN', action: 'alert', events: ['not_found'] },\n  R9: { stable: 'ADMIN_PATH_ACCESS_DENIED', action: 'alert', events: ['authz_deny'] },\n  R10: { stable: 'DIRECT_CONFIDENTIAL_ACCESS_DENIED', action: 'alert', events: ['authz_deny'] },\n  R11: { stable: 'REPEATED_AI_TOOL_PERMISSION_DENIAL', action: 'contain', events: ['agent_tool_call'] },\n  R12: { stable: 'CONTENT_TRIGGERED_PROTECTED_TOOL_DENIAL', action: 'contain', events: ['agent_tool_call'] }\n};\nconst expectedSeverity = {\n  R1: { account_compromise_suspected: 'high', account_locked: 'medium' },\n  R2: { prompt_injection_detected: 'high' }, R5: { login_failure: 'medium' },\n  R6: { post_lock_retry_detected: 'high' }, R7: { login_success: 'info' },\n  R8: { not_found: 'info' }, R9: { authz_deny: 'medium' }, R10: { authz_deny: 'medium' }\n};\nconst id = text(raw.rule && raw.rule.id, 8);\nconst alertId = text(raw.alert && raw.alert.id, 160);\nconst contractValid = raw.schema_version === '1.1' && !!id && !!alertId && !!raw.event && typeof raw.event === 'object' && !Array.isArray(raw.event);\nconst ruleMeta = rules[id];\nconst evType = text(srcEvent.event_type, 80);\nconst severity = text(raw.rule && raw.rule.severity, 24).toLowerCase();\nconst actionLevel = text(raw.action_level, 24).toLowerCase();\nconst priority = num(raw.alert && raw.alert.priority);\nconst timestamp = text(raw.alert && raw.alert.timestamp, 64);\nconst timestampValid = !!timestamp && Number.isFinite(Date.parse(timestamp));\nconst stable = text(raw.rule && raw.rule.stable_name, 100);\nconst display = text(raw.rule && raw.rule.display_name, 180);\nconst supported = contractValid && !!ruleMeta && stable === ruleMeta.stable && ruleMeta.events.includes(evType);\nconst priorityValid = Number.isInteger(priority) && [1, 2, 3].includes(priority);\nconst severityValid = ['info', 'low', 'medium', 'high', 'critical'].includes(severity);\nconst severityMatches = !expectedSeverity[id] || expectedSeverity[id][evType] === severity;\nconst metadataValid = !!ruleMeta && stable === ruleMeta.stable && actionLevel === ruleMeta.action && severityValid && severityMatches && priorityValid && timestampValid;\n\n// Strict allowlist: message/body/prompt/password/token/cookie and arbitrary Graylog fields are omitted.\nconst allowed = ['event_type', 'injection_type', 'source_type', 'source_component', 'trigger_source',\n  'user', 'role', 'src_ip', 'request_id', 'session_id', 'tool_name', 'resource_class',\n  'resource_id', 'trigger_resource_id', 'pattern_id', 'decision', 'reason', 'severity',\n  'path', 'resource', 'required', 'count', 'window_seconds', 'failed_attempts',\n  'lock_request_id', 'trigger_event_type'];\nconst event = {};\nfor (const key of allowed) {\n  if (!Object.prototype.hasOwnProperty.call(srcEvent, key)) continue;\n  const value = srcEvent[key];\n  if (['count', 'window_seconds', 'failed_attempts'].includes(key)) {\n    const n = num(value);\n    if (Number.isFinite(n)) event[key] = n;\n  } else {\n    const v = text(value, ['path', 'resource'].includes(key) ? 240 : 180);\n    if (v) event[key] = key === 'decision' ? v.toUpperCase() : v;\n  }\n}\nconst evidenceAllow = new Set(['event_count', 'distinct_users', 'retry_count', 'denied_calls',\n  'failed_attempts', 'success_after_failures', 'window_seconds', 'correlation_window_seconds',\n  'after_event', 'prior_event_type', 'lock_request_id', 'trigger_event_type', 'timezone', 'local_time']);\nif (srcEvent.evidence && typeof srcEvent.evidence === 'object' && !Array.isArray(srcEvent.evidence)) {\n  const evidence = {};\n  for (const [key, value] of Object.entries(srcEvent.evidence)) {\n    if (!evidenceAllow.has(key)) continue;\n    if (typeof value === 'number' && Number.isFinite(value)) evidence[key] = value;\n    else if (typeof value === 'boolean') evidence[key] = value;\n    else if (typeof value === 'string' && !miss(value)) evidence[key] = text(value, 160);\n  }\n  if (Object.keys(evidence).length) event.evidence = evidence;\n}\nconst decision = text(event.decision, 16).toUpperCase();\nconst decisionValid = ['ALLOW', 'DENY', 'BLOCK', 'WARN', 'INFO'].includes(decision);\nconst hasDecision = decisionValid;\nconst srcIp = text(event.src_ip, 64);\nconst user = text(event.user, 80);\nconst ticketKey = srcIp ? 'ip:' + srcIp : (user ? 'user:' + user : '');\nlet evidenceValid = true;\nif (id === 'R1' && evType === 'account_compromise_suspected') evidenceValid = Number(event.failed_attempts) >= 3 && Number(event.window_seconds) === 300;\nif (id === 'R2') evidenceValid = event.injection_type === 'direct' && decision === 'DENY' &&\n  ['ignore_previous_instructions', 'reveal_hidden_prompt', 'policy_bypass_protected_data'].includes(event.pattern_id) &&\n  !!user && !!srcIp && !!event.request_id && !!event.session_id;\nif (id === 'R5') evidenceValid = !!srcIp;\nif (id === 'R6') evidenceValid = evType === 'post_lock_retry_detected' && !!user && !!srcIp &&\n  !!event.request_id && !!event.lock_request_id && Number.isInteger(event.count) && event.count >= 3 && Number(event.window_seconds) === 300;\nif (id === 'R7') evidenceValid = !!user && !!srcIp;\nif (id === 'R8') evidenceValid = !!srcIp;\nif (id === 'R9') evidenceValid = !!user && !!event.path;\nif (id === 'R10') evidenceValid = !!user && !!event.path && !!event.resource;\nif (id === 'R3' || id === 'R11' || id === 'R12') evidenceValid = !!user && !!event.tool_name;\nif (id === 'R4') evidenceValid = !!event.caller_service || !!event.source_component || !!srcIp;\nif (id === 'R1' && evType === 'account_locked') evidenceValid = true;\n\nconst decisionConsistent = id === 'R1'\n  ? (evType === 'account_compromise_suspected' ? decision === 'WARN' : ['DENY', 'BLOCK'].includes(decision))\n  : id === 'R2' ? decision === 'DENY'\n  : ['R3', 'R11', 'R12'].includes(id) ? decision === 'DENY'\n  : id === 'R5' ? (!hasDecision || decision === 'DENY')\n  : id === 'R6' ? (!hasDecision || decision === 'WARN')\n  : id === 'R7' ? (!hasDecision || decision === 'ALLOW')\n  : id === 'R8' ? (!hasDecision || decision === 'INFO')\n  : ['R9', 'R10'].includes(id) ? (!hasDecision || ['DENY', 'BLOCK'].includes(decision))\n  : id === 'R4' ? (!hasDecision || ['ALLOW', 'DENY', 'BLOCK'].includes(decision)) : false;\nconst autoAllowed = contractValid && supported && metadataValid && evidenceValid && hasDecision && decisionConsistent &&\n  !['R1', 'R2', 'R4', 'R5', 'R6', 'R7', 'R8', 'R9', 'R10'].includes(id);\nconst notificationAllowed = contractValid && supported && stable === ruleMeta.stable && priorityValid && timestampValid &&\n  severityValid && severityMatches && evidenceValid && actionLevel === ruleMeta.action && hasDecision && decisionConsistent;\nlet responseGroup = 'notify';\nif (supported && id === 'R1') responseGroup = 'lock';\nif (autoAllowed && ['R3', 'R11', 'R12'].includes(id)) responseGroup = 'session_ai';\nif (supported && id === 'R4' && metadataValid) responseGroup = 'token';\nconst eventTypeSeverity = expectedSeverity[id] && expectedSeverity[id][evType];\nconst plannedActions = id === 'R1' && evType === 'account_compromise_suspected'\n  ? ['이상 징후 경보', '티켓', '자동 계정 잠금 금지']\n  : id === 'R1' && evType === 'account_locked'\n    ? ['기존 잠금 결과 기록', '티켓', '추가 잠금 금지']\n    : ['알림', '티켓'];\nif (['R3', 'R11', 'R12'].includes(id)) plannedActions.push('DENY 및 정책 검증 시 세션 종료', 'AI Tool 제한은 pending');\nif (id === 'R4') plannedActions.push('내부 API 토큰 폐기는 placeholder/pending');\n\nlet fallbackReason = '';\nif (!contractValid) fallbackReason = 'schema_version_or_required_envelope_field_invalid';\nelse if (!supported) fallbackReason = 'unsupported_rule_or_stable_name_or_event_type';\nelse if (!priorityValid) fallbackReason = 'graylog_priority_must_be_1_to_3';\nelse if (!timestampValid) fallbackReason = 'alert_timestamp_missing_or_invalid';\nelse if (!evidenceValid) fallbackReason = 'rule_evidence_missing_or_invalid';\nelse if (!metadataValid) fallbackReason = 'rule_metadata_missing_or_invalid';\nelse if (!hasDecision) fallbackReason = 'decision_missing_or_invalid';\nelse if (!decisionConsistent) fallbackReason = 'decision_inconsistent_with_rule';\nelse if (!ticketKey) fallbackReason = 'no_safe_ticket_key';\nconst seen = sd.seen && typeof sd.seen === 'object' && !Array.isArray(sd.seen) ? sd.seen : {};\nconst duplicate = !!alertId && !!seen[alertId];\nif (duplicate) fallbackReason = 'duplicate_alert_id';\nconst cfg = inp;\nconst mode = cfg.response_mode === 'live' ? 'live' : 'dry-run';\nconst liveEnabled = cfg.live_enabled === true;\nconst severityLabel = severity || '';\nconst bits = [`[${id || 'UNKNOWN'}] ${display || stable || '지원하지 않는 규칙'}`, `출발지 ${srcIp || (user ? 'user:' + user : '-')}`, `계정 ${user || '-'}`, `이벤트 ${evType || '-'}`];\nif (Number.isFinite(event.count)) bits.push(`${event.count}건`);\nif (hasDecision) bits.push('판정 ' + decision);\nif (event.tool_name) bits.push('Tool ' + event.tool_name);\nif (severityLabel) bits.push('심각도 ' + severityLabel);\nif (plannedActions.length) bits.push('대응 계획: ' + plannedActions.join(', '));\nreturn [{ json: {\n  schema_version: text(raw.schema_version, 8), contract_valid: contractValid,\n  rule_id: id, rule: { id, stable_name: stable, display_name: display, severity: severity || undefined },\n  alert: { id: alertId, timestamp, priority }, event, severity: severity || undefined,\n  src_ip: srcIp, user, request_id: text(event.request_id, 120), session_id: text(event.session_id, 120),\n  tool_name: text(event.tool_name, 120), count: Number.isFinite(event.count) ? event.count : 1,\n  first_seen: timestamp, last_seen: timestamp,\n  graylog_event_id: alertId, ticket_key: ticketKey,\n  ticket_type: id === 'R1' && evType === 'account_locked' ? '잠금 결과 기록' : (id === 'R1' ? '이상 징후 경보' : '보안 경보'),\n  response_group: responseGroup, actions: plannedActions, message: bits.join(' | '),\n  decision, action_level: actionLevel, auto_response_allowed: autoAllowed,\n  discord_enabled: mode === 'live' && liveEnabled && notificationAllowed && actionLevel !== 'observe',\n  response_mode: mode, live_enabled: liveEnabled,\n  lock_minutes: cfg.lock_minutes, whitelist_ips: Array.isArray(cfg.whitelist_ips) ? cfg.whitelist_ips : [],\n  duplicate, skip_side_effects: duplicate || !!fallbackReason, fallback_reason: fallbackReason || undefined,\n  rule_metadata_severity: severity || undefined,\n  priority_source: 'graylog.alert.priority', priority_preserved: priority\n} }];"
+      },
+      "id": "a1f0c0de-0003-4000-8000-000000000003",
+      "name": "정규화·대응 계획",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nconst sd = $getWorkflowStaticData('global');\nsd.tickets = sd.tickets || {};\nsd.history = sd.history || [];\nsd.whitelist = sd.whitelist || {};\nsd.skipped = sd.skipped || [];\nsd.seq = sd.seq || 0;\nconst rememberAlert = id => {\n  if (!id) return;\n  const seen = sd.seen && typeof sd.seen === 'object' && !Array.isArray(sd.seen) ? sd.seen : {};\n  seen[id] = Date.now();\n  sd.seen = seen;\n  const keys = Object.keys(seen);\n  if (keys.length > 500) for (const key of keys.sort((a, b) => seen[a] - seen[b]).slice(0, keys.length - 500)) delete seen[key];\n};\nconst whitelist = Array.isArray(d.whitelist_ips) ? d.whitelist_ips.map(String) : [];\nif (d.src_ip && (whitelist.includes(d.src_ip) || sd.whitelist[d.src_ip])) {\n  sd.skipped.unshift({ time: d.last_seen, src_ip: d.src_ip, rule_id: d.rule_id });\n  sd.skipped = sd.skipped.slice(0, 50);\n  rememberAlert(d.graylog_event_id);\n  return [{ json: { ...d, whitelisted: true, skip_side_effects: true } }];\n}\nconst rank = { '이상 징후 경보': 1, '보안 경보': 1, '잠금 결과 기록': 2, '차단 조치': 2, '침해 인시던트': 3 };\nconst key = d.ticket_key;\nif (!key) return [];\nlet t = sd.tickets[key];\nlet isNew = false;\nif (t && t.status === 'closed') { sd.history.push(t); t = null; }\nif (!t) {\n  sd.seq += 1;\n  t = { id: 'NX-' + String(sd.seq).padStart(4, '0'), ticket_key: key, src_ip: d.src_ip || '',\n        type: d.ticket_type, rules: [], users: [], count: 0, first_seen: d.first_seen, last_seen: d.last_seen, status: 'open' };\n  isNew = true;\n}\nif ((rank[d.ticket_type] || 0) > (rank[t.type] || 0)) t.type = d.ticket_type;\nif (!t.rules.includes(d.rule_id)) t.rules.push(d.rule_id);\nif (d.user && !t.users.includes(d.user)) t.users.push(d.user);\nt.count += Number(d.count) || 1;\nt.last_seen = d.last_seen;\nt.latest = { rule: d.rule, alert: d.alert, event: d.event, action_level: d.action_level, decision: d.decision };\nsd.tickets[key] = t;\nrememberAlert(d.graylog_event_id);\nreturn [{ json: { ...d, ticket_id: t.id, ticket_is_new: isNew, ticket_type: t.type,\n  ticket_rules: t.rules, ticket_users: t.users, ticket_event_total: t.count,\n  message: `[${t.id} ${isNew ? '신규' : '갱신'}] ` + d.message } }];"
+      },
+      "id": "a1f0c0de-0008-4000-8000-000000000008",
+      "name": "티켓 기록(출발지별)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "c2",
+              "leftValue": "={{ $json.discord_enabled }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1f0c0de-0004-4000-8000-000000000004",
+      "name": "Discord 설정됨?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        48
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "webhook",
+        "operation": "sendLegacy",
+        "content": "={{ $json.message }}",
+        "options": {}
+      },
+      "id": "a1f0c0de-0005-4000-8000-000000000005",
+      "name": "Discord 알림",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [
+        1104,
+        -48
+      ],
+      "credentials": {
+        "discordWebhookApi": {
+          "name": "NEXUS Discord Webhook (재연결 필요)"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "a1f0c0de-0006-4000-8000-000000000006",
+      "name": "Discord 건너뜀(미설정·관찰·시험)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1104,
+        112
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "a1f0c0de-0007-4000-8000-000000000007",
+      "name": "payload 계약 오류",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        672,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "r-R1",
+                    "leftValue": "={{ $json.response_group }}",
+                    "rightValue": "lock",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "계정 잠금"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "r-R2",
+                    "leftValue": "={{ $json.response_group }}",
+                    "rightValue": "notify",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "알림·티켓"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "r-R3",
+                    "leftValue": "={{ $json.response_group }}",
+                    "rightValue": "session_ai",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "세션·AI Tool"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "id": "r-R4",
+                    "leftValue": "={{ $json.response_group }}",
+                    "rightValue": "token",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "토큰 폐기"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1f0c0de-0009-4000-8000-000000000009",
+      "name": "규칙별 대응",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1344,
+        304
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "a1f0c0de-0011-4000-8000-000000000011",
+      "name": "대응 자리: 알림·티켓만(R2,R5~R10)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1104,
+        512
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "a1f0c0de-0013-4000-8000-000000000013",
+      "name": "대응 자리: 내부 API 토큰 폐기(R4)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1104,
+        832
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({status: $json.duplicate ? \"duplicate\" : ($json.fallback_reason ? \"fallback\" : ($json.whitelisted ? \"whitelisted\" : \"accepted\")), rule_id: $json.rule_id || undefined, alert_id: $json.graylog_event_id || undefined}) }}",
+        "options": {
+          "responseCode": "={{ $json.fallback_reason && !$json.duplicate ? 202 : 200 }}"
+        }
+      },
+      "id": "a1f0c0de-0014-4000-8000-000000000014",
+      "name": "응답(중복·fallback·화이트리스트)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        448,
+        -48
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({status:\"invalid_payload\", reason:\"schema_version_or_required_envelope_field_invalid\"}) }}",
+        "options": {
+          "responseCode": 422
+        }
+      },
+      "id": "a1f0c0de-0015-4000-8000-000000000015",
+      "name": "응답 422(계약 오류)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        896,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "path": "nexus-tickets",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        },
+        "authentication": "headerAuth"
+      },
+      "id": "a1f0c0de-0016-4000-8000-000000000016",
+      "name": "상황판 조회(GET)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        1040
+      ],
+      "webhookId": "a1f0c0de-0016-4000-8000-0000000000bb",
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "NEXUS x-webhook-token (재연결 필요)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json || {};\nconst sd = $getWorkflowStaticData('global');\nsd.tickets = sd.tickets || {}; sd.history = sd.history || []; sd.whitelist = sd.whitelist || {}; sd.skipped = sd.skipped || [];\nconst configured = Array.isArray(input.whitelist_ips) ? input.whitelist_ips.map(String) : [];\nconst all = [...Object.values(sd.tickets), ...sd.history].sort((a, b) => (a.id < b.id ? 1 : -1));\nconst open = all.filter(t => t.status === 'open');\nconst by_type = {};\nfor (const t of open) by_type[t.type] = (by_type[t.type] || 0) + 1;\nreturn [{ json: { http: 200, body: {\n  generated_at: new Date().toISOString(),\n  summary: { open: open.length, closed: all.length - open.length, by_type },\n  tickets: all,\n  whitelist: [...configured.map(ip => ({ ip, source: '환경설정' })), ...Object.entries(sd.whitelist).map(([ip, v]) => ({ ip, source: '상황판', ...v }))],\n  skipped: sd.skipped.slice(0, 10)\n} } }];"
+      },
+      "id": "a1f0c0de-0017-4000-8000-000000000017",
+      "name": "티켓 목록 만들기",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        1040
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.http }}"
+        }
+      },
+      "id": "a1f0c0de-0018-4000-8000-000000000018",
+      "name": "응답(티켓 목록)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        448,
+        1040
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "nexus-ticket-action",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        },
+        "authentication": "headerAuth"
+      },
+      "id": "a1f0c0de-0019-4000-8000-000000000019",
+      "name": "티켓 처리 요청(POST)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        1248
+      ],
+      "webhookId": "a1f0c0de-0019-4000-8000-0000000000cc",
+      "credentials": {
+        "httpHeaderAuth": {
+          "name": "NEXUS x-webhook-token (재연결 필요)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json || {};\nconst sd = $getWorkflowStaticData('global');\nsd.tickets = sd.tickets || {}; sd.history = sd.history || []; sd.whitelist = sd.whitelist || {}; sd.skipped = sd.skipped || [];\nconst configured = Array.isArray(input.whitelist_ips) ? input.whitelist_ips.map(String) : [];\nconst b = input.body || {};\nconst now = new Date().toISOString();\nconst ipOk = ip => /^(?:\\d{1,3}\\.){3}\\d{1,3}$/.test(String(ip || ''));\nconst res = (http, body) => [{ json: { http, body } }];\nconst userOk = u => /^[A-Za-z][A-Za-z0-9._-]{0,49}$/.test(String(u || ''));\nconst findT = id => Object.values(sd.tickets).find(x => x.id === id);\nconst mode = input.response_mode === 'live' && input.live_enabled === true ? 'live' : 'dry-run';\nconst lockMin = Math.min(Math.max(parseInt(input.lock_minutes, 10) || 15, 1), 1440);\nconst LABEL = { applied: '적용', no_change: '변경 없음', 'dry-run': '미실행(dry-run)', error: '오류' };\nconst addRec = (t, rec) => { t.responses = (t.responses || []).concat([rec]).slice(-30); };\nif (b.action === 'close' || b.action === 'false_positive') {\n  const t = Object.values(sd.tickets).find(x => x.id === b.ticket_id);\n  if (!t) return res(404, { status: 'not_found' });\n  if (t.status === 'closed') return res(409, { status: 'already_closed' });\n  t.status = 'closed'; t.resolution = b.action === 'false_positive' ? '오탐' : '조치 완료'; t.closed_at = now;\n  t.note = String(b.note || '').slice(0, 500);\n  if (b.action === 'false_positive' && b.whitelist === true && ipOk(t.src_ip)) sd.whitelist[t.src_ip] = { added_at: now, reason: '오탐 ' + t.id };\n  return res(200, { status: 'ok', ticket: t });\n}\nif (b.action === 'request_release') {\n  const user = String(b.user || '').trim();\n  if (!userOk(user)) return res(400, { status: 'bad_user' });\n  const linked = b.ticket_id ? findT(b.ticket_id) : null;\n  if (b.ticket_id && !linked) return res(404, { status: 'not_found' });\n  sd.seq = (sd.seq || 0) + 1;\n  const t = { id: 'NX-' + String(sd.seq).padStart(4, '0'), src_ip: linked ? linked.src_ip : '', type: '오탐·해제 요청',\n    rules: [], users: [user], user, count: 1, first_seen: now, last_seen: now, status: 'open', linked_ticket: linked ? linked.id : null, reason: String(b.reason || '').slice(0, 300) };\n  sd.tickets['request:' + t.id] = t;\n  return res(200, { status: 'ok', ticket: t });\n}\nif (b.action === 'release' || b.action === 'lock') {\n  const t = findT(b.ticket_id);\n  if (!t) return res(404, { status: 'not_found' });\n  const user = String(b.user || t.user || (t.users.length === 1 ? t.users[0] : '')).trim();\n  if (!userOk(user)) return res(400, { status: 'bad_user', hint: 'user 를 지정하세요' });\n  if (![...(t.users || []), t.user].includes(user)) return res(400, { status: 'user_not_in_ticket' });\n  const rel = b.action === 'release';\n  const ctx = { ticket_id: t.id, user, kind: b.action, mode, by: '상황판',\n    step: rel ? '계정 잠금 해제' : '계정 잠금(사람 승인)', undo: rel ? '상황판의 \"잠금(승인)\"으로 다시 잠금' : 'locked_until = NULL (잠금 해제)' };\n  if (mode !== 'live') {\n    const rec = { time: now, step: ctx.step, user, mode, status: 'dry-run', label: LABEL['dry-run'], by: ctx.by, detail: 'dry-run(DB를 바꾸지 않음)', undo: ctx.undo };\n    addRec(t, rec);\n    return res(200, { status: 'ok', result: rec, ticket: t });\n  }\n  const sql = rel ? 'UPDATE users SET locked_until = NULL WHERE username = $1'\n    : 'UPDATE users SET locked_until = DATE_ADD(NOW(), INTERVAL $1 MINUTE) WHERE username = $2';\n  const verify = \"SELECT '\" + (rel ? 'release' : 'lock') + \"' AS step_key, username, pinned, locked_until, (locked_until IS NOT NULL AND locked_until > NOW()) AS locked, session_version FROM users WHERE username = $1\";\n  return [{ json: { http: 200, body: null, db: { ...ctx, execute: input.live_enabled === true, sql, params: rel ? [user] : [lockMin, user], verify_sql: verify } } }];\n}\nif (b.action === 'whitelist_add') {\n  if (!ipOk(b.ip)) return res(400, { status: 'bad_ip' });\n  sd.whitelist[b.ip] = { added_at: now, reason: String(b.note || '수동 추가').slice(0, 200) };\n  return res(200, { status: 'ok', ip: b.ip });\n}\nif (b.action === 'whitelist_remove') {\n  if (!sd.whitelist[b.ip] && !configured.includes(String(b.ip || ''))) return res(404, { status: 'not_found' });\n  delete sd.whitelist[b.ip];\n  return res(200, { status: 'ok', ip: b.ip, note: configured.includes(String(b.ip || '')) ? '환경설정 whitelist는 설정 노드에서 관리' : undefined });\n}\nreturn res(400, { status: 'bad_action', allowed: ['close', 'false_positive', 'release', 'lock', 'request_release', 'whitelist_add', 'whitelist_remove'] });"
+      },
+      "id": "a1f0c0de-0020-4000-8000-000000000020",
+      "name": "티켓 처리·화이트리스트",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        1248
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.http }}"
+        }
+      },
+      "id": "a1f0c0de-0021-4000-8000-000000000021",
+      "name": "응답(처리 결과)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1328,
+        1248
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nconst mode = d.response_mode === 'live' ? 'live' : 'dry-run';\nconst live = mode === 'live' && d.live_enabled === true && d.auto_response_allowed === true;\nconst lockMin = Math.min(Math.max(parseInt(d.lock_minutes, 10) || 15, 1), 1440);\nconst user = String(d.user || '').trim();\nconst okUser = /^[A-Za-z][A-Za-z0-9._-]{0,49}$/.test(user);\nconst base = { ticket_id: d.ticket_id, ticket_key: d.ticket_key, rule_id: d.rule_id, user, mode,\n  live_enabled: d.live_enabled === true, discord_enabled: d.discord_enabled };\nconst steps = [];\nconst VERIFY = k => \"SELECT '\" + k + \"' AS step_key, username, pinned, locked_until, (locked_until IS NOT NULL AND locked_until > NOW()) AS locked, session_version FROM users WHERE username = $1\";\nif (d.response_group === 'lock' && d.auto_response_allowed === true) {\n  steps.push({ step: '계정 잠금', sql: 'UPDATE users SET locked_until = IF(pinned = 0, DATE_ADD(NOW(), INTERVAL $1 MINUTE), locked_until), session_version = IF(pinned = 1, session_version + 1, session_version) WHERE username = $2',\n    params: [lockMin, user], verify_sql: VERIFY('lock'), undo: 'UPDATE users SET locked_until = NULL WHERE username = ?', note: lockMin + '분' });\n}\nif (d.response_group === 'session_ai' && d.auto_response_allowed === true && d.decision === 'DENY') {\n  steps.push({ step: '세션 종료(강제 로그아웃)', sql: 'UPDATE users SET session_version = session_version + 1 WHERE username = $1',\n    params: [user], verify_sql: VERIFY('logout'), undo: '되돌릴 필요 없음(다시 로그인하면 됨)' });\n  steps.push({ step: 'AI Tool 제한', pending: 'Tool Gateway 미구현: 실제 제한은 pending' });\n}\nif (!steps.length) steps.push({ step: '자동 대응 없음', skip_reason: d.rule_id === 'R1' ? 'R1은 기존 account_locked 결과 기록 또는 account_compromise_suspected 경보만 수행' : 'decision/action_level/metadata 확인 또는 구현 준비 전에는 자동 DB 조치 금지' });\nreturn steps.map(s => ({ json: { ...base, ...s,\n  execute: live && okUser && !!s.sql,\n  skip_reason: s.skip_reason || (!s.sql ? (s.pending || s.skip_reason) : (!okUser ? (user ? '계정 이름 형식 오류' : '대상 계정 없음') : (!live ? 'dry-run 또는 live_enabled=false (DB를 바꾸지 않음)' : ''))) } }));"
+      },
+      "id": "a1f0c0de-0022-4000-8000-000000000022",
+      "name": "대응 준비(DB 조치)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1568,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cx23",
+              "leftValue": "={{ $json.execute }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1f0c0de-0023-4000-8000-000000000023",
+      "name": "DB 조치 실행?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1328,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.sql }}",
+        "options": {
+          "queryReplacement": "={{ $json.params.join(',') }}"
+        }
+      },
+      "id": "a1f0c0de-0024-4000-8000-000000000024",
+      "name": "DB 조치 실행",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        1552,
+        304
+      ],
+      "credentials": {
+        "mySql": {
+          "name": "NEXUS 포털 DB (n8n 전용 계정) (재연결 필요)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const prep = $('대응 준비(DB 조치)').all();\nconst sd = $getWorkflowStaticData('global');\nconst LABEL = { applied: '적용', partial: '일부 적용(세션 종료만)', no_change: '변경 없음', 'dry-run': '미실행(dry-run)', skipped: '건너뜀', error: '오류', pending: 'AI 연동 후 구현' };\nlet updErr = null;\ntry { updErr = $('DB 조치 실행').all().find(u => u.json && u.json.error) || null; } catch (e) {}\nconst execCtx = (prep.find(p => p.json.execute) || {}).json;\nconst out = [];\nfor (const it of $input.all()) {\n  const j = it.json;\n  let ctx, status, detail = '', note;\n  if (j.step) {                                   // DB를 거치지 않은 항목(dry-run·건너뜀·보류)\n    ctx = j; detail = j.skip_reason || '';\n    status = j.pending ? 'pending' : (String(j.skip_reason).startsWith('dry-run') ? 'dry-run' : 'skipped');\n  } else {                                        // 조치 후 확인 조회 결과\n    ctx = execCtx || {};\n    if (updErr || j.error) { status = 'error'; detail = String((updErr ? updErr.json.message : j.message) || '').slice(0, 200); }\n    else if (!j.username) { status = 'no_change'; detail = '대상 계정을 찾지 못함'; }\n    else if (Number(j.pinned) === 1 && j.step_key === 'lock') { status = 'partial'; detail = '고정 계정: 잠금 없이 세션 종료만 실행. 잠금은 사람이 승인'; note = '세션 버전 ' + j.session_version; }\n    else if (j.step_key === 'lock' && !Number(j.locked)) { status = 'error'; detail = '조치 후에도 잠금 상태가 아님'; }\n    else { status = 'applied'; note = j.step_key === 'lock' ? ('잠금 해제 예정 ' + j.locked_until) : ('세션 버전 ' + j.session_version); }\n  }\n  const rec = { time: new Date().toISOString(), step: ctx.step, user: ctx.user, mode: ctx.mode, status, label: LABEL[status] };\n  if (detail) rec.detail = detail;\n  if (note || ctx.note) rec.note = note || ctx.note;\n  if (ctx.undo) rec.undo = ctx.undo;\n  const t = sd.tickets && sd.tickets[ctx.ticket_key];\n  if (t) { t.responses = (t.responses || []).concat([rec]).slice(-30); }\n  out.push({ json: { ...rec, ticket_id: ctx.ticket_id, rule_id: ctx.rule_id,\n    discord_enabled: !!ctx.discord_enabled && ctx.live_enabled === true && ['applied', 'partial', 'no_change', 'error'].includes(status),\n    message: `[${ctx.ticket_id}] 대응 결과: ${ctx.step} → ${LABEL[status]} | 대상 ${ctx.user || '-'}` + (rec.note ? ' | ' + rec.note : '') + (detail ? ' | ' + detail : '') } });\n}\nreturn out;\n"
+      },
+      "id": "a1f0c0de-0025-4000-8000-000000000025",
+      "name": "대응 결과 기록",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1872,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cx26",
+              "leftValue": "={{ $json.discord_enabled }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1f0c0de-0026-4000-8000-000000000026",
+      "name": "결과를 Discord로?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2096,
+        352
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "webhook",
+        "operation": "sendLegacy",
+        "content": "={{ $json.message }}",
+        "options": {}
+      },
+      "id": "a1f0c0de-0027-4000-8000-000000000027",
+      "name": "대응 결과 알림",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [
+        2320,
+        304
+      ],
+      "credentials": {
+        "discordWebhookApi": {
+          "name": "NEXUS Discord Webhook (재연결 필요)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $('대응 준비(DB 조치)').all().find(p => p.json.execute).json.verify_sql }}",
+        "options": {
+          "queryReplacement": "={{ $('대응 준비(DB 조치)').all().find(p => p.json.execute).json.user }}"
+        }
+      },
+      "id": "a1f0c0de-0028-4000-8000-000000000028",
+      "name": "조치 확인 조회",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        1664,
+        304
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "mySql": {
+          "name": "NEXUS 포털 DB (n8n 전용 계정) (재연결 필요)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cx30",
+              "leftValue": "={{ !!($json.db && $json.db.execute) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1f0c0de-0030-4000-8000-000000000030",
+      "name": "계정 조치 실행?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        448,
+        1248
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.db.sql }}",
+        "options": {
+          "queryReplacement": "={{ $json.db.params.join(',') }}"
+        }
+      },
+      "id": "a1f0c0de-0031-4000-8000-000000000031",
+      "name": "계정 조치 실행",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        672,
+        1168
+      ],
+      "credentials": {
+        "mySql": {
+          "name": "NEXUS 포털 DB (n8n 전용 계정) (재연결 필요)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $('티켓 처리·화이트리스트').first().json.db.verify_sql }}",
+        "options": {
+          "queryReplacement": "={{ $('티켓 처리·화이트리스트').first().json.db.user }}"
+        }
+      },
+      "id": "a1f0c0de-0032-4000-8000-000000000032",
+      "name": "계정 조치 확인",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        880,
+        1168
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "mySql": {
+          "name": "NEXUS 포털 DB (n8n 전용 계정) (재연결 필요)"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('티켓 처리·화이트리스트').first().json.db;\nconst sd = $getWorkflowStaticData('global');\nconst LABEL = { applied: '적용', no_change: '변경 없음', error: '오류' };\nlet updErr = null;\ntry { updErr = $('계정 조치 실행').all().find(u => u.json && u.json.error) || null; } catch (e) {}\nconst j = $input.first().json;\nlet status, detail = '', note;\nif (updErr || j.error) { status = 'error'; detail = String((updErr ? updErr.json.message : j.message) || '').slice(0, 200); }\nelse if (!j.username) { status = 'no_change'; detail = '대상 계정을 찾지 못함'; }\nelse if (ctx.kind === 'release') {\n  if (Number(j.locked)) { status = 'error'; detail = '조치 후에도 잠겨 있음'; } else { status = 'applied'; note = '잠금 해제됨'; }\n} else {\n  if (!Number(j.locked)) { status = 'error'; detail = '조치 후에도 잠금 상태가 아님'; } else { status = 'applied'; note = '잠금 해제 예정 ' + j.locked_until; }\n}\nconst now = new Date().toISOString();\nconst rec = { time: now, step: ctx.step, user: ctx.user, mode: ctx.mode, status, label: LABEL[status], by: ctx.by, undo: ctx.undo };\nif (detail) rec.detail = detail;\nif (note) rec.note = note;\nconst all = Object.values(sd.tickets || {});\nconst t = all.find(x => x.id === ctx.ticket_id);\nconst push = x => { if (x) x.responses = (x.responses || []).concat([rec]).slice(-30); };\npush(t);\nif (t && t.linked_ticket) push(all.find(x => x.id === t.linked_ticket));\nif (t && t.type === '오탐·해제 요청' && ctx.kind === 'release' && status === 'applied' && t.status === 'open') {\n  t.status = 'closed'; t.resolution = '해제 승인'; t.closed_at = now;\n}\nreturn [{ json: { http: status === 'error' ? 502 : 200, body: { status: status === 'error' ? 'error' : 'ok', result: rec, ticket: t } } }];\n"
+      },
+      "id": "a1f0c0de-0033-4000-8000-000000000033",
+      "name": "계정 조치 결과·응답",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1104,
+        1168
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "setting-mode",
+              "name": "response_mode",
+              "value": "dry-run",
+              "type": "string"
+            },
+            {
+              "id": "setting-live",
+              "name": "live_enabled",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "id": "setting-lock",
+              "name": "lock_minutes",
+              "value": 15,
+              "type": "number"
+            },
+            {
+              "id": "setting-whitelist",
+              "name": "whitelist_ips",
+              "value": [],
+              "type": "array"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {},
+        "include": "except",
+        "excludeFields": "headers"
+      },
+      "id": "a1f0c0de-0034-4000-8000-000000000034",
+      "name": "NEXUS 안전 설정(수신)",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        224,
+        208
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "dedup-or-fallback",
+              "leftValue": "={{ !!$json.skip_side_effects }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1f0c0de-0035-4000-8000-000000000035",
+      "name": "중복·비지원 이벤트 차단",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        896,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "setting-mode",
+              "name": "response_mode",
+              "value": "dry-run",
+              "type": "string"
+            },
+            {
+              "id": "setting-live",
+              "name": "live_enabled",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "id": "setting-lock",
+              "name": "lock_minutes",
+              "value": 15,
+              "type": "number"
+            },
+            {
+              "id": "setting-whitelist",
+              "name": "whitelist_ips",
+              "value": [],
+              "type": "array"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {},
+        "include": "except",
+        "excludeFields": "headers"
+      },
+      "id": "a1f0c0de-0036-4000-8000-000000000036",
+      "name": "NEXUS 안전 설정(조회)",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        224,
+        1040
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "duplicateItem": false,
+        "assignments": {
+          "assignments": [
+            {
+              "id": "setting-mode",
+              "name": "response_mode",
+              "value": "dry-run",
+              "type": "string"
+            },
+            {
+              "id": "setting-live",
+              "name": "live_enabled",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "id": "setting-lock",
+              "name": "lock_minutes",
+              "value": 15,
+              "type": "number"
+            },
+            {
+              "id": "setting-whitelist",
+              "name": "whitelist_ips",
+              "value": [],
+              "type": "array"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {},
+        "include": "except",
+        "excludeFields": "headers"
+      },
+      "id": "a1f0c0de-0037-4000-8000-000000000037",
+      "name": "NEXUS 안전 설정(티켓 처리)",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        224,
+        1248
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({status: \"accepted\", rule_id: $json.rule_id, alert_id: $json.graylog_event_id}) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "a1f0c0de-0038-4000-8000-000000000038",
+      "name": "응답 200(티켓 기록 후 접수)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1260,
+        80
+      ]
+    },
+    {
+      "id": "a1f0c0de-0039-4000-8000-000000000039",
+      "name": "화이트리스트 제외?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1100,
+        80
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "whitelisted-alert",
+              "leftValue": "={{ !!$json.whitelisted }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "정규화·대응 계획",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "schema_version·필수 식별자 검증": {
+      "main": [
+        [
+          {
+            "node": "중복·비지원 이벤트 차단",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "payload 계약 오류",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "정규화·대응 계획": {
+      "main": [
+        [
+          {
+            "node": "NEXUS 안전 설정(수신)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "중복·비지원 이벤트 차단": {
+      "main": [
+        [
+          {
+            "node": "응답(중복·fallback·화이트리스트)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "티켓 기록(출발지별)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "티켓 기록(출발지별)": {
+      "main": [
+        [
+          {
+            "node": "화이트리스트 제외?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Discord 설정됨?": {
+      "main": [
+        [
+          {
+            "node": "Discord 알림",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Discord 건너뜀(미설정·관찰·시험)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Discord 알림": {
+      "main": [
+        []
+      ]
+    },
+    "Discord 건너뜀(미설정·관찰·시험)": {
+      "main": [
+        []
+      ]
+    },
+    "payload 계약 오류": {
+      "main": [
+        [
+          {
+            "node": "응답 422(계약 오류)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "응답 422(계약 오류)": {
+      "main": [
+        []
+      ]
+    },
+    "규칙별 대응": {
+      "main": [
+        [
+          {
+            "node": "대응 준비(DB 조치)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "대응 자리: 알림·티켓만(R2,R5~R10)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "대응 준비(DB 조치)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "대응 자리: 내부 API 토큰 폐기(R4)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "대응 자리: 알림·티켓만(R2,R5~R10)": {
+      "main": [
+        []
+      ]
+    },
+    "대응 자리: 내부 API 토큰 폐기(R4)": {
+      "main": [
+        []
+      ]
+    },
+    "상황판 조회(GET)": {
+      "main": [
+        [
+          {
+            "node": "NEXUS 안전 설정(조회)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "티켓 목록 만들기": {
+      "main": [
+        [
+          {
+            "node": "응답(티켓 목록)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "응답(티켓 목록)": {
+      "main": [
+        []
+      ]
+    },
+    "티켓 처리 요청(POST)": {
+      "main": [
+        [
+          {
+            "node": "NEXUS 안전 설정(티켓 처리)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "티켓 처리·화이트리스트": {
+      "main": [
+        [
+          {
+            "node": "계정 조치 실행?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "응답(처리 결과)": {
+      "main": [
+        []
+      ]
+    },
+    "대응 준비(DB 조치)": {
+      "main": [
+        [
+          {
+            "node": "DB 조치 실행?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB 조치 실행?": {
+      "main": [
+        [
+          {
+            "node": "DB 조치 실행",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "대응 결과 기록",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB 조치 실행": {
+      "main": [
+        [
+          {
+            "node": "조치 확인 조회",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "조치 확인 조회": {
+      "main": [
+        [
+          {
+            "node": "대응 결과 기록",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "대응 결과 기록": {
+      "main": [
+        [
+          {
+            "node": "결과를 Discord로?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "결과를 Discord로?": {
+      "main": [
+        [
+          {
+            "node": "대응 결과 알림",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "대응 결과 알림": {
+      "main": [
+        []
+      ]
+    },
+    "계정 조치 실행?": {
+      "main": [
+        [
+          {
+            "node": "계정 조치 실행",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "응답(처리 결과)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "계정 조치 실행": {
+      "main": [
+        [
+          {
+            "node": "계정 조치 확인",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "계정 조치 확인": {
+      "main": [
+        [
+          {
+            "node": "계정 조치 결과·응답",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "계정 조치 결과·응답": {
+      "main": [
+        [
+          {
+            "node": "응답(처리 결과)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NEXUS 안전 설정(수신)": {
+      "main": [
+        [
+          {
+            "node": "schema_version·필수 식별자 검증",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NEXUS 안전 설정(조회)": {
+      "main": [
+        [
+          {
+            "node": "티켓 목록 만들기",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NEXUS 안전 설정(티켓 처리)": {
+      "main": [
+        [
+          {
+            "node": "티켓 처리·화이트리스트",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "응답 200(티켓 기록 후 접수)": {
+      "main": [
+        [
+          {
+            "node": "Discord 설정됨?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "규칙별 대응",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "화이트리스트 제외?": {
+      "main": [
+        [
+          {
+            "node": "응답(중복·fallback·화이트리스트)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "응답 200(티켓 기록 후 접수)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "meta": {
+    "instanceId": "eea350229af4b6d9c43a1f66e7a14d5175d04d925acc01dfa874f3f5c93ecbd9"
+  },
+  "nodeGroups": [],
+  "tags": []
+}
