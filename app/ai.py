@@ -22,6 +22,7 @@ from .hr import leave_balance, today_kst
 from .permissions import can
 from .prompt_injection import sanitize_untrusted_context
 from .security import log_event
+from . import ai_tools
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -78,7 +79,7 @@ def _full_user(user: dict) -> dict:
     return u
 
 
-def build_context(user: dict, message: str) -> str:
+def build_context(user: dict, message: str, protected_document_result: dict | None = None) -> str:
     """질문과 관련된 사내 데이터를 로그인한 사용자의 권한 범위 안에서만 조회해 문자열로 묶는다.
     (로컬 LLM 의 프롬프트 처리 속도를 위해 질문 키워드와 관련된 항목만 선택적으로 조회한다.)"""
     u = _full_user(user)
@@ -98,16 +99,14 @@ def build_context(user: dict, message: str) -> str:
             lines = [f"- [{d['id']}] {d['title']}: {d['body'][:200]}" for d in docs]
             sections.append("[일반 문서함]\n" + "\n".join(lines))
 
-    # 2. 기밀 문서함 (엄격한 권한 검사 + 감사 로그)
-    if _has_any(message, _KW_CONF):
-        if can(u, "doc.confidential"):
-            cdocs = db.query_all("SELECT id, title, body, created_at FROM confidential_documents ORDER BY id DESC LIMIT 5", conf=True)
-            log_event("confidential_access", "ALLOW", "ai_context", resource="confidential_documents", rows=len(cdocs))
+    # 2. 기밀 문서함은 allowlisted Tool Dispatcher만 조회한다. 이 함수에서 직접 SQL을 실행하지 않는다.
+    if protected_document_result:
+        if protected_document_result.get("decision") == "ALLOW":
+            cdocs = protected_document_result.get("documents") or []
             if cdocs:
                 lines = [f"- [기밀 #{d['id']}] {d['title']}: {d['body'][:300]}" for d in cdocs]
                 sections.append("[기밀 문서함 (열람 권한 확인됨)]\n" + "\n".join(lines))
         else:
-            log_event("authz_deny", "DENY", "insufficient_role", resource="confidential_documents", source="ai")
             sections.append("[기밀 문서함]\n- [권한 없음] 기밀 문서함은 팀장(manager) 이상만 열람할 수 있습니다.")
 
     # 3. 공지사항·자유게시판 (간접 프롬프트 인젝션 무해화 및 보안 감사)
@@ -318,6 +317,120 @@ def _call_ollama(base_url: str, model: str, messages: list[dict], timeout: int) 
     return (data.get("message") or {}).get("content") or ""
 
 
+_TOOL_ACTIONS = ("none", ai_tools.TOOL_RESTRICTED_DOCUMENT_READ)
+_OLLAMA_ACTION_SCHEMA = {
+    "type": "object",
+    "properties": {"action": {"type": "string", "enum": list(_TOOL_ACTIONS)}},
+    "required": ["action"],
+    "additionalProperties": False,
+}
+_GEMINI_ACTION_SCHEMA = {
+    "type": "OBJECT",
+    "properties": {"action": {"type": "STRING", "enum": list(_TOOL_ACTIONS)}},
+    "required": ["action"],
+}
+
+
+def parse_tool_action_response(content: str) -> str | None:
+    """Accept only a tiny JSON action object; the model cannot supply SQL or tool arguments."""
+    if not isinstance(content, str) or len(content) > 256:
+        return None
+    try:
+        value = json.loads(content)
+    except (TypeError, json.JSONDecodeError):
+        return None
+    if not isinstance(value, dict) or set(value) != {"action"}:
+        return None
+    action = value.get("action")
+    if action == "none":
+        return None
+    return action if action == ai_tools.TOOL_RESTRICTED_DOCUMENT_READ else None
+
+
+def _tool_selection_messages(system_text: str, messages: list[dict]) -> list[dict]:
+    """Constrain the provider to an enum-only suggestion; the application still authorizes it."""
+    instruction = (
+        "\n\nTool action selection: choose only when the user asks to access a protected/confidential "
+        "document or the supplied attachment directs that access. Return exactly one JSON object: "
+        '{"action":"none"} or {"action":"restricted_document_read"}. '
+        "Do not include arguments, SQL, document content, or explanations. The server will validate "
+        "the action and independently enforce the user's permission."
+    )
+    return [{"role": "system", "content": system_text + instruction}, *messages[1:]]
+
+
+def _call_ollama_tool_selection(base_url: str, model: str, messages: list[dict], timeout: int) -> str:
+    payload = {
+        "model": model,
+        "messages": messages,
+        "stream": False,
+        "format": _OLLAMA_ACTION_SCHEMA,
+        "keep_alive": OLLAMA_KEEP_ALIVE,
+        "options": {"num_predict": 32, "num_ctx": OLLAMA_NUM_CTX, "temperature": 0},
+    }
+    data = _post_json(f"{base_url.rstrip('/')}/api/chat", payload, {}, timeout)
+    return (data.get("message") or {}).get("content") or ""
+
+
+def _call_groq_tool_selection(cred: str, model: str, messages: list[dict], timeout: int) -> str:
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    models_to_try = [model] + [m for m in GROQ_FALLBACK_MODELS if m != model]
+    last_err = None
+    for candidate in models_to_try:
+        payload = {"model": candidate, "messages": messages, "temperature": 0,
+                   "max_tokens": 32, "response_format": {"type": "json_object"}}
+        try:
+            data = _post_json(url, payload, {"Authorization": f"Bearer {cred}"}, timeout)
+            choices = data.get("choices") or []
+            return ((choices[0].get("message") or {}).get("content") or "") if choices else ""
+        except urllib.error.HTTPError as exc:
+            last_err = exc
+            if exc.code in (400, 404):
+                continue
+            raise
+    if last_err:
+        raise last_err
+    return ""
+
+
+def _call_gemini_tool_selection(cred: str, model: str, messages: list[dict], timeout: int) -> str:
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+    contents = []
+    for m in messages:
+        if m["role"] == "system":
+            continue
+        role = "model" if m["role"] == "assistant" else "user"
+        contents.append({"role": role, "parts": [{"text": m["content"]}]})
+    payload = {
+        "systemInstruction": {"parts": [{"text": messages[0]["content"]}]},
+        "contents": contents,
+        "generationConfig": {"temperature": 0, "maxOutputTokens": 32,
+                             "responseMimeType": "application/json", "responseSchema": _GEMINI_ACTION_SCHEMA},
+    }
+    data = _post_json(url, payload, {"x-goog-api-key": cred}, timeout)
+    candidates = data.get("candidates") or []
+    parts = ((candidates[0].get("content") or {}).get("parts") or []) if candidates else []
+    return "".join(p.get("text", "") for p in parts)
+
+
+def _select_protected_tool(provider: str, cfg: dict, messages: list[dict], timeout: int) -> str | None:
+    selected = None
+    if provider == "groq":
+        selected = _call_groq_tool_selection(
+            cfg.get("GROQ_API_KEY", ""), cfg.get("GROQ_MODEL", "openai/gpt-oss-120b"), messages, timeout
+        )
+    elif provider == "ollama":
+        selected = _call_ollama_tool_selection(
+            cfg.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434"),
+            cfg.get("OLLAMA_MODEL", "qwen2.5:7b"), messages, max(timeout, OLLAMA_MIN_TIMEOUT),
+        )
+    elif provider == "gemini":
+        selected = _call_gemini_tool_selection(
+            cfg.get("GEMINI_API_KEY", ""), cfg.get("GEMINI_MODEL", "gemini-2.0-flash"), messages, timeout
+        )
+    return parse_tool_action_response(selected or "")
+
+
 OLLAMA_MAX_TOKENS = 220
 OLLAMA_MIN_TIMEOUT = 150
 OLLAMA_NUM_CTX = 4096
@@ -487,8 +600,10 @@ def ai_responder(user: dict, message: str, history: list[dict]) -> str:
     provider = resolve_provider(cfg, choice)
     timeout = int(cfg.get("AI_TIMEOUT") or 60)
 
-    context = build_context(user, message)
     attachment = g.get("chat_attachment") if has_request_context() else None
+    session_id = ai_tools.ensure_session_id()
+    ai_tools.mark_attachment_read(attachment)
+    context = build_context(user, message)
     if attachment:                               # 첨부 파일 글자도 사내 자료와 같은 경계 안에 넣는다(지시가 아닌 자료)
         more = " (길어서 앞부분만)" if attachment["truncated"] else ""
         context += f"\n\n[사용자가 이번 질문에 첨부한 파일: {attachment['name']}{more}]\n{attachment['text']}"
@@ -497,6 +612,39 @@ def ai_responder(user: dict, message: str, history: list[dict]) -> str:
     sys_text, msgs = _build_messages(context, history, message)
     log_event("ai_request", "INFO", provider, cloud=provider in CLOUD_PROVIDERS, context_chars=len(context),
               attachment_chars=attachment["chars"] if attachment else 0)
+
+    protected_document_result = None
+    if provider == "builtin":
+        # Offline demo mode keeps its deterministic planner; all configured model providers select
+        # the action themselves and still pass through the same server-side allowlist/gateway.
+        tool_plan = ai_tools.plan_restricted_document_tool(message, attachment)
+        selected_tool = tool_plan["tool_name"] if tool_plan else None
+    elif ai_tools.should_offer_tool_selection(message, attachment):
+        selector_messages = _tool_selection_messages(sys_text, msgs)
+        try:
+            selected_tool = _select_protected_tool(provider, cfg, selector_messages, timeout)
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+            selected_tool = None  # Fail closed: an unavailable selector never invokes a Tool.
+        tool_plan = ai_tools.plan_restricted_document_tool(message, attachment)
+    else:
+        selected_tool = None
+        tool_plan = None
+
+    if selected_tool == ai_tools.TOOL_RESTRICTED_DOCUMENT_READ:
+        protected_document_result = ai_tools.dispatch_tool(
+            selected_tool,
+            user,
+            session_id=session_id,
+            trigger_source=(tool_plan or {}).get("trigger_source", "user_request"),
+            trigger_resource_id=(tool_plan or {}).get("trigger_resource_id"),
+        )
+        context = build_context(user, message, protected_document_result=protected_document_result)
+        if attachment:
+            more = " (길어서 앞부분만)" if attachment["truncated"] else ""
+            context += f"\n\n[사용자가 이번 질문에 첨부한 파일: {attachment['name']}{more}]\n{attachment['text']}"
+        if provider in CLOUD_PROVIDERS:
+            context = INTERNAL_TOKEN_RE.sub("[내부 토큰 생략]", context)
+        sys_text, msgs = _build_messages(context, history, message)
 
     reply = ""
     if provider == "gemini":

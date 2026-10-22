@@ -11,12 +11,9 @@
 대화 내용은 DB(chat_messages)에만 저장하고 보안 로그에는 글자 수만 남긴다.
 n8n 이 users.ai_restricted=1 로 바꾼 사용자(R3 대응)는 다음 요청부터 응답기를 부르지 않고 제한 안내만 받는다.
 첨부 파일(chat_attach)은 저장하지 않고 뽑은 글자를 g.chat_attachment 로 응답기에 넘긴다(그 질문에만 쓰인다)."""
-import re
-import secrets
+from flask import Blueprint, current_app, g, redirect, render_template, request, url_for
 
-from flask import Blueprint, current_app, g, redirect, render_template, request, session, url_for
-
-from . import chat_attach, db, validators
+from . import ai_tools, chat_attach, db, validators
 from .auth import login_required
 from .prompt_injection import detect_direct_prompt_injection
 from .security import ip_rate_limited, log_event
@@ -85,6 +82,7 @@ def chat_send():
     except ValueError as exc:
         log_event("input_rejected", "DENY", str(exc), field="chat")
         return _render(MESSAGE_ERROR, 400)
+    session_id = ai_tools.ensure_session_id()
     attachment, note = None, ""
     storage = request.files.get("attachment")
     if storage and storage.filename:
@@ -95,15 +93,12 @@ def chat_send():
             log_event("upload_reject", "BLOCK", str(exc), target="chat_attachment", size=len(data))
             return _render(chat_attach.MESSAGES.get(str(exc), "첨부 파일을 읽지 못했습니다."), 400)
         g.chat_attachment = attachment
+        ai_tools.observe_attachment(attachment)
         note = f"\n\n[첨부 파일: {attachment['name']}, {attachment['chars']:,}자{' (길어서 앞부분만)' if attachment['truncated'] else ''}]"
         log_event("chat_attachment", "INFO", "ok", ext=attachment["ext"], size=len(data), chars=attachment["chars"])
 
     pattern_id = detect_direct_prompt_injection(message)
     if pattern_id:
-        session_id = session.get("nexus_session_id")
-        if not isinstance(session_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{24,64}", session_id):
-            session_id = secrets.token_urlsafe(24)
-            session["nexus_session_id"] = session_id
         log_event(
             "prompt_injection_detected",
             "DENY",

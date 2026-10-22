@@ -30,6 +30,65 @@ CREATE TABLE security_auth_events (
   KEY idx_security_auth_lock_ip_time (event_type, username, src_ip, occurred_at)
 ) ENGINE=InnoDB;
 
+-- R11 상관분석용 최소 Tool DENY 증거. 원문·문서 본문·자격 증명은 저장하지 않는다.
+CREATE TABLE security_ai_tool_denials (
+  request_id  VARCHAR(64) NOT NULL PRIMARY KEY,
+  user_id     INT UNSIGNED NOT NULL,
+  session_id  VARCHAR(64) NOT NULL,
+  tool_name   VARCHAR(64) NOT NULL,
+  occurred_at DATETIME(6) NOT NULL,
+  KEY idx_ai_deny_correlation (user_id, session_id, tool_name, occurred_at),
+  KEY idx_ai_deny_cleanup (occurred_at),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB;
+
+-- n8n Ticket의 원자적 upsert/dedup 저장소. event_payload는 n8n allowlist 정규화 결과만 담는다.
+CREATE TABLE security_incident_tickets (
+  id                BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  ticket_key        VARCHAR(255) NOT NULL,
+  status            ENUM('open','closed') NOT NULL DEFAULT 'open',
+  active_ticket_key VARCHAR(255) GENERATED ALWAYS AS (CASE WHEN status='open' THEN ticket_key ELSE NULL END) STORED,
+  src_ip            VARCHAR(45) NOT NULL DEFAULT '',
+  ticket_type       VARCHAR(80) NOT NULL,
+  type_rank         SMALLINT UNSIGNED NOT NULL DEFAULT 1,
+  event_count       BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  rule_ids          JSON NOT NULL,
+  user_names        JSON NOT NULL,
+  first_seen        DATETIME(6) NOT NULL,
+  last_seen         DATETIME(6) NOT NULL,
+  latest_event      JSON NOT NULL,
+  resolution        VARCHAR(40) NULL,
+  closed_at         DATETIME(6) NULL,
+  note              VARCHAR(500) NULL,
+  responses         JSON NOT NULL,
+  UNIQUE KEY uq_security_incident_active_key (active_ticket_key),
+  KEY idx_security_incident_status_seen (status, last_seen)
+) ENGINE=InnoDB;
+
+CREATE TABLE security_incident_alerts (
+  alert_id      VARCHAR(160) NOT NULL PRIMARY KEY,
+  receipt_id    VARCHAR(64) NOT NULL,
+  ticket_id     BIGINT UNSIGNED NULL,
+  rule_id       VARCHAR(8) NOT NULL,
+  event_type    VARCHAR(80) NOT NULL,
+  user_name     VARCHAR(64) NOT NULL DEFAULT '',
+  src_ip        VARCHAR(45) NOT NULL DEFAULT '',
+  event_count   INT UNSIGNED NOT NULL DEFAULT 1,
+  occurred_at   DATETIME(6) NOT NULL,
+  event_payload JSON NOT NULL,
+  KEY idx_security_incident_alert_ticket (ticket_id, occurred_at),
+  KEY idx_security_incident_alert_rule_time (rule_id, occurred_at),
+  CONSTRAINT fk_security_incident_alert_ticket FOREIGN KEY (ticket_id)
+    REFERENCES security_incident_tickets(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+-- Discord 웹훅의 전역 발송 슬롯. burst가 와도 모든 workflow 실행에서 직렬화한다.
+CREATE TABLE security_discord_rate_limit (
+  id              TINYINT UNSIGNED NOT NULL PRIMARY KEY,
+  next_allowed_at DATETIME(6) NOT NULL,
+  CONSTRAINT chk_security_discord_rate_limit_singleton CHECK (id = 1)
+) ENGINE=InnoDB;
+
 -- 직원 주소록(일반 정보). 계정이 없는 직원도 있을 수 있다.
 CREATE TABLE employees (
   id      INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
