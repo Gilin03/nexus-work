@@ -174,8 +174,29 @@ TOOL_INTERNAL_API_CALL = "internal_api_call"
 
 
 def is_defense_on() -> bool:
-    """Return True if DEFENSE_MODE is enabled (default: on). When 'off', simulates attack success for demo."""
+    """DEFENSE_MODE(기본값: on). off 설정 시 기밀 문서 열람과 출력을 허용해 공격 성공을 시연한다.
+    운영 중 .env 파일을 수정하면 서버 재시작 없이도 실시간으로 방어 켜짐/꺼짐이 전환된다."""
     import os
+    import sys
+    from pathlib import Path
+    from dotenv import dotenv_values
+
+    # 단위 테스트 환경에서는 monkeypatch 지원을 위해 os.environ 우선 적용
+    if "pytest" in sys.modules or os.environ.get("TESTING"):
+        return os.environ.get("DEFENSE_MODE", "on").strip().lower() != "off"
+
+    # 운영 환경에서는 .env 파일 변경값을 실시간 우선 반영
+    try:
+        base_dir = Path(__file__).resolve().parent.parent
+        env_file = base_dir / ".env"
+        if env_file.exists():
+            cfg = dotenv_values(env_file)
+            mode = cfg.get("DEFENSE_MODE")
+            if mode is not None and str(mode).strip():
+                return str(mode).strip().lower() != "off"
+    except Exception:
+        pass
+
     return os.environ.get("DEFENSE_MODE", "on").strip().lower() != "off"
 
 
