@@ -43,3 +43,18 @@ def test_all_decoy_routes_respond_404(aapp):
     for path in ["/.git/config", "/backup/backup.sql", "/phpmyadmin", "/wp-login.php"]:
         resp = client.get(path)
         assert resp.status_code == 404
+
+
+def test_decoy_auto_block_remains_60_minutes(app, monkeypatch):
+    from app import decoy
+
+    calls = []
+    monkeypatch.setattr(security, "is_ip_blocked", lambda _ip: (False, ""))
+    monkeypatch.setattr(decoy, "block_ip", lambda *args, **kwargs: calls.append((args, kwargs)) or True)
+
+    response = app.test_client().get("/.env", environ_base={"REMOTE_ADDR": "198.51.100.88"})
+
+    assert response.status_code == 404
+    assert calls == [(("198.51.100.88",), {
+        "reason": "decoy_probe:/.env", "minutes": 60, "created_by": "honeypot",
+    })]

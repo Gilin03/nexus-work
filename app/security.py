@@ -353,9 +353,10 @@ def csrf_token() -> str:
 def check_csrf():
     if request.method in ("GET", "HEAD", "OPTIONS"):
         return
-    if request.path.startswith("/api/v1/") or request.path.startswith("/internal/api/v1/blocked-ips"):
-        # 메신저(nexus-messenger) 및 내부 REST API(n8n/SOAR IP 차단 연동)용 토큰 인증 API.
-        # 세션 쿠키를 사용하지 않으므로(Bearer 토큰만 신뢰) CSRF 검사에서 제외한다.
+    if (request.path.startswith("/api/v1/")
+            or request.path.startswith("/internal/api/v1/blocked-ips")
+            or request.path == "/internal/api/v1/ip-block"):
+        # Bearer 인증 API는 브라우저 세션 쿠키를 신뢰하지 않아 CSRF 검사가 필요 없다.
         return
     sent = request.headers.get("X-CSRF-Token") or request.form.get("csrf_token", "")
     expected = session.get("csrf", "")

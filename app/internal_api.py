@@ -13,11 +13,18 @@ import os
 
 from flask import Blueprint, jsonify, request
 
+from . import security
 from .security import get_client_ip, ip_rate_limited, log_event
 
 bp = Blueprint("internal_api", __name__, url_prefix="/internal/api/v1")
 
 RATE_LIMIT = 30
+AUTO_BLOCK_REASONS = {
+    "R5": "account_spray",
+    "R6": "post_lock_retry",
+    "R8": "web_path_scan",
+}
+AUTO_BLOCK_WHITELIST = {"127.0.0.1", "192.168.3.10", "192.168.3.11", "192.168.3.14", "192.168.3.15", "::1"}
 
 
 def token_fingerprint(token: str) -> str:
@@ -233,3 +240,53 @@ def unblock_blocked_ip_delete(ip):
         return jsonify(ok=False, error="unauthorized", message="유효하지 않은 인증 토큰입니다."), 401
 
     return _handle_unblock(ip, token)
+
+
+@bp.post("/ip-block")
+def automated_ip_block():
+    """NEXUS R5/R6/R8용 내부 차단 경로. 검증 후 기존 block_ip만 호출한다."""
+    client_ip = get_client_ip()
+    if ip_rate_limited(f"internal_api:{client_ip}", RATE_LIMIT):
+        log_event("rate_limited", "BLOCK", "internal_api_limit", via="direct")
+        return jsonify(ok=False, error="rate_limited"), 429
+
+    header = request.headers.get("Authorization", "")
+    token = header[7:].strip() if header.lower().startswith("bearer ") else ""
+    authorized, _ = internal_api("/ip-block", token, "direct")
+    if not authorized:
+        return jsonify(ok=False, error="unauthorized"), 401
+
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or set(data) != {"ip_address", "rule_id", "reason", "duration_minutes"}:
+        return jsonify(ok=False, error="invalid_request"), 400
+
+    rule_id = data.get("rule_id")
+    reason = data.get("reason")
+    duration = data.get("duration_minutes")
+    if rule_id not in AUTO_BLOCK_REASONS or reason != AUTO_BLOCK_REASONS.get(rule_id):
+        return jsonify(ok=False, error="unsupported_rule_or_reason"), 400
+    if isinstance(duration, bool) or not isinstance(duration, int) or not 1 <= duration <= 15:
+        return jsonify(ok=False, error="invalid_duration"), 400
+
+    raw_ip = data.get("ip_address")
+    try:
+        parsed_ip = ipaddress.ip_address(raw_ip)
+        mapped_ip = getattr(parsed_ip, "ipv4_mapped", None)
+        if mapped_ip:
+            parsed_ip = mapped_ip
+        ip = parsed_ip.compressed
+    except (ValueError, TypeError):
+        return jsonify(ok=False, error="invalid_ip"), 400
+    if parsed_ip.is_unspecified or parsed_ip.is_multicast:
+        return jsonify(ok=False, error="invalid_ip"), 400
+    if ip in AUTO_BLOCK_WHITELIST or parsed_ip.is_loopback:
+        security.log_event("ip_block_automation", "DENY", "ip_whitelisted", action=rule_id, resource=ip)
+        return jsonify(ok=False, error="ip_whitelisted"), 403
+
+    block_reason = f"n8n_{rule_id}_{reason}"
+    if not security.block_ip(ip, reason=block_reason, minutes=duration, created_by="n8n"):
+        security.log_event("ip_block_automation", "ERROR", "block_ip_failed", action=rule_id, resource=ip)
+        return jsonify(ok=False, error="block_failed"), 503
+
+    security.log_event("ip_block_automation", "BLOCK", block_reason, action=rule_id, resource=ip)
+    return jsonify(ok=True, blocked=True, ip_address=ip, rule_id=rule_id, duration_minutes=duration)
