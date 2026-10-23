@@ -181,3 +181,117 @@ def test_n8n_api_token_support(app, monkeypatch):
     res2 = c.get("/internal/api/v1/blocked-ips", headers={"X-API-Token": n8n_token})
     assert res2.status_code == 200
 
+
+def _ip_block_client(monkeypatch, security):
+    import time
+
+    monkeypatch.setenv("LAB_INTERNAL_API_TOKEN", TOKEN)
+    now = [time.monotonic()]
+    blocked = {}
+    calls = []
+
+    def block_ip(ip, reason, minutes, created_by):
+        calls.append((ip, reason, minutes, created_by))
+        blocked[ip] = (now[0] + minutes * 60, reason)
+        return True
+
+    def is_ip_blocked(ip):
+        row = blocked.get(ip)
+        if row and row[0] > now[0]:
+            return True, row[1]
+        return False, ""
+
+    monkeypatch.setattr(security, "block_ip", block_ip)
+    monkeypatch.setattr(security, "is_ip_blocked", is_ip_blocked)
+    return now, calls, blocked
+
+
+def _block_request(client, ip="198.51.100.25", rule_id="R5", reason="account_spray", duration=15, token=TOKEN):
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    return client.post("/internal/api/v1/ip-block", json={
+        "ip_address": ip, "rule_id": rule_id, "reason": reason, "duration_minutes": duration,
+    }, headers=headers)
+
+
+def test_automated_ip_block_api_reuses_block_ip_and_causes_403_then_expires(app, monkeypatch):
+    from app import security
+
+    now, calls, _ = _ip_block_client(monkeypatch, security)
+    client = app.test_client()
+    response = _block_request(client)
+
+    assert response.status_code == 200
+    assert response.get_json() == {"ok": True, "blocked": True, "ip_address": "198.51.100.25",
+                                   "rule_id": "R5", "duration_minutes": 15}
+    assert calls == [("198.51.100.25", "n8n_R5_account_spray", 15, "n8n")]
+    assert client.get("/login", environ_base={"REMOTE_ADDR": "198.51.100.25"}).status_code == 403
+
+    now[0] += 15 * 60
+    assert client.get("/login", environ_base={"REMOTE_ADDR": "198.51.100.25"}).status_code == 200
+
+
+@pytest.mark.parametrize("ip", ["127.0.0.1", "192.168.3.10", "192.168.3.11", "192.168.3.14", "192.168.3.15"])
+def test_automated_ip_block_api_never_blocks_whitelisted_ips(app, monkeypatch, ip):
+    from app import security
+
+    _, calls, _ = _ip_block_client(monkeypatch, security)
+    response = _block_request(app.test_client(), ip=ip)
+
+    assert response.status_code == 403
+    assert response.get_json() == {"ok": False, "error": "ip_whitelisted"}
+    assert calls == []
+
+
+@pytest.mark.parametrize(("rule_id", "reason"), [
+    ("R5", "account_spray"),
+    ("R6", "post_lock_retry"),
+    ("R8", "web_path_scan"),
+])
+def test_automated_ip_block_api_accepts_only_supported_rule_reasons(app, monkeypatch, rule_id, reason):
+    from app import security
+
+    _, calls, _ = _ip_block_client(monkeypatch, security)
+    response = _block_request(app.test_client(), rule_id=rule_id, reason=reason)
+
+    assert response.status_code == 200
+    assert calls == [("198.51.100.25", f"n8n_{rule_id}_{reason}", 15, "n8n")]
+
+
+def test_automated_ip_block_api_requires_existing_bearer_token(app, monkeypatch):
+    from app import security
+
+    _, calls, _ = _ip_block_client(monkeypatch, security)
+    response = _block_request(app.test_client(), token="wrong")
+
+    assert response.status_code == 401
+    assert response.get_json() == {"ok": False, "error": "unauthorized"}
+    assert calls == []
+
+
+def test_automated_ip_block_api_rejects_mapped_whitelisted_ip(app, monkeypatch):
+    from app import security
+
+    _, calls, _ = _ip_block_client(monkeypatch, security)
+    response = _block_request(app.test_client(), ip="::ffff:192.168.3.10")
+
+    assert response.status_code == 403
+    assert response.get_json() == {"ok": False, "error": "ip_whitelisted"}
+    assert calls == []
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"ip": "not-an-ip"},
+    {"rule_id": "R2", "reason": "direct_prompt_injection"},
+    {"rule_id": "R6", "reason": "account_spray"},
+    {"duration": 16},
+    {"duration": 0},
+])
+def test_automated_ip_block_api_rejects_invalid_or_unsupported_requests(app, monkeypatch, kwargs):
+    from app import security
+
+    _, calls, _ = _ip_block_client(monkeypatch, security)
+    response = _block_request(app.test_client(), **kwargs)
+
+    assert response.status_code == 400
+    assert response.get_json()["ok"] is False
+    assert calls == []
