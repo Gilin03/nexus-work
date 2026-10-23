@@ -72,3 +72,112 @@ def test_rate_limit_per_ip(lab, events):
 def test_only_get_and_no_cookie_session_needed(lab):
     assert lab.post("/internal/api/v1/flag", headers={"Authorization": f"Bearer {TOKEN}"}).status_code == 403   # POST 는 CSRF 단계에서 막힌다
     assert lab.get("/internal/api/v1/other", headers={"Authorization": f"Bearer {TOKEN}"}).status_code == 404
+
+
+def test_blocked_ips_unauthorized(lab):
+    # 토큰 없이 조회/차단/해제 요청 시 401 거부
+    assert lab.get("/internal/api/v1/blocked-ips").status_code == 401
+    assert lab.post("/internal/api/v1/blocked-ips", json={"ip": "1.2.3.4"}).status_code == 401
+    assert lab.post("/internal/api/v1/blocked-ips/unblock", json={"ip": "1.2.3.4"}).status_code == 401
+    assert lab.delete("/internal/api/v1/blocked-ips/1.2.3.4").status_code == 401
+
+    # 잘못된 토큰 시 401 거부
+    bad_headers = {"Authorization": "Bearer wrong_token"}
+    assert lab.get("/internal/api/v1/blocked-ips", headers=bad_headers).status_code == 401
+    assert lab.post("/internal/api/v1/blocked-ips", json={"ip": "1.2.3.4"}, headers=bad_headers).status_code == 401
+
+
+def test_blocked_ips_crud_lifecycle(lab, app, events):
+    from app import security
+    headers = {"Authorization": f"Bearer {TOKEN}"}
+    target_ip = "198.51.100.42"
+
+    with app.app_context():
+        security.unblock_ip(target_ip)
+
+    # 1. IP 차단 등록 (POST /blocked-ips)
+    res_block = lab.post(
+        "/internal/api/v1/blocked-ips",
+        json={"ip": target_ip, "reason": "soar_auto_containment", "minutes": 45},
+        headers=headers
+    )
+    assert res_block.status_code == 200
+    data = res_block.get_json()
+    assert data["ok"] is True
+    assert data["ip"] == target_ip
+    assert data["minutes"] == 45
+    assert data["reason"] == "soar_auto_containment"
+
+    # security 모듈 및 DB 확인
+    with app.app_context():
+        blocked, reason = security.is_ip_blocked(target_ip)
+        assert blocked is True
+        assert reason == "soar_auto_containment"
+
+    # 2. 차단 목록 조회 (GET /blocked-ips)
+    res_list = lab.get("/internal/api/v1/blocked-ips", headers=headers)
+    assert res_list.status_code == 200
+    list_data = res_list.get_json()
+    assert list_data["ok"] is True
+    assert any(item["ip_address"] == target_ip for item in list_data["items"])
+
+    # 3. 차단 해제 (POST /blocked-ips/unblock)
+    res_unblock = lab.post(
+        "/internal/api/v1/blocked-ips/unblock",
+        json={"ip": target_ip},
+        headers=headers
+    )
+    assert res_unblock.status_code == 200
+    assert res_unblock.get_json()["ok"] is True
+
+    with app.app_context():
+        blocked, _ = security.is_ip_blocked(target_ip)
+        assert blocked is False
+
+    # 4. 재차단 후 DELETE 메소드로 해제 테스트
+    lab.post("/internal/api/v1/blocked-ips", json={"ip": target_ip}, headers=headers)
+    with app.app_context():
+        assert security.is_ip_blocked(target_ip)[0] is True
+
+    res_del = lab.delete(f"/internal/api/v1/blocked-ips/{target_ip}", headers=headers)
+    assert res_del.status_code == 200
+    assert res_del.get_json()["ok"] is True
+
+    with app.app_context():
+        assert security.is_ip_blocked(target_ip)[0] is False
+
+
+def test_blocked_ips_validation(lab):
+    headers = {"Authorization": f"Bearer {TOKEN}"}
+
+    # 잘못된 IP 형식
+    res_invalid = lab.post("/internal/api/v1/blocked-ips", json={"ip": "invalid-ip-format"}, headers=headers)
+    assert res_invalid.status_code == 400
+    assert res_invalid.get_json()["error"] == "invalid_ip"
+
+    # 루프백 주소 차단 방지 (127.0.0.1, ::1)
+    res_loopback = lab.post("/internal/api/v1/blocked-ips", json={"ip": "127.0.0.1"}, headers=headers)
+    assert res_loopback.status_code == 400
+    assert "루프백" in res_loopback.get_json()["message"]
+
+    res_loopback6 = lab.post("/internal/api/v1/blocked-ips", json={"ip": "::1"}, headers=headers)
+    assert res_loopback6.status_code == 400
+
+    # 빈 값
+    res_empty = lab.post("/internal/api/v1/blocked-ips", json={}, headers=headers)
+    assert res_empty.status_code == 400
+
+
+def test_n8n_api_token_support(app, monkeypatch):
+    n8n_token = "n8n_custom_secret_key_98765"
+    monkeypatch.setenv("N8N_API_TOKEN", n8n_token)
+    c = app.test_client()
+
+    # Bearer 헤더로 인증 확인
+    res1 = c.get("/internal/api/v1/blocked-ips", headers={"Authorization": f"Bearer {n8n_token}"})
+    assert res1.status_code == 200
+
+    # X-API-Token 헤더로 인증 확인
+    res2 = c.get("/internal/api/v1/blocked-ips", headers={"X-API-Token": n8n_token})
+    assert res2.status_code == 200
+

@@ -1,14 +1,14 @@
-"""실습용 내부 API(기획서 4.1 4~5단계). 기밀 문서(M&A_PLAN)에서 얻은 토큰으로 호출하면 FLAG 를 돌려준다.
-이시헌의 ai-agent 브랜치(9db742a)의 internal_api.py·ai_gateway.internal_api 를 main 으로 옮긴 것이다(AI 에이전트 부분은 아직 옮기지 않음).
+"""실습용 내부 API(기획서 4.1 4~5단계) 및 SOAR/n8n 자동화 연동 API.
+1. 플래그 확인: 기밀 문서(M&A_PLAN)에서 얻은 토큰으로 호출하면 FLAG 를 돌려준다.
+2. IP 차단 관리: n8n/SOAR 등 외부 보안 자동화 워크플로우가 DB 포트(3307)를 직접 열지 않고도
+   HTTP API(Bearer 토큰 인증)를 통해 악성 IP 차단/해제/목록 조회를 수행할 수 있도록 지원한다.
 
-- 이 HTTP 경로로 직접 오는 호출은 via=direct 로 남는다. 탐지 규칙 R4(출발지가 포털 서버(게이트웨이)가 아닌 호출)가 이것을 본다.
-  나중에 AI 게이트웨이가 대신 부르는 호출은 같은 internal_api() 를 via=gateway 로 쓴다.
-- 직접 호출을 막지는 않는다(토큰이 맞으면 FLAG 를 준다). 공방전 시나리오의 목표 지점이고, 막는 대신 탐지·대응(n8n)으로 다룬다.
-- 로그에는 토큰 원문 대신 지문(token_fp)과 출발지 IP, 경로만 남긴다. 토큰 비교는 상수 시간.
-- 토큰(LAB_INTERNAL_API_TOKEN)과 FLAG(LAB_INTERNAL_API_FLAG)는 .env 에서만 읽고 코드·문서에 쓰지 않는다.
-- 같은 IP 의 호출은 분당 30번으로 제한한다(토큰 추측·로그 폭주 방지)."""
+- 토큰 비교는 상수 시간(hmac.compare_digest)을 사용하며, 원문 대신 10자리 지문(token_fp)만 로그에 남긴다.
+- 토큰은 LAB_INTERNAL_API_TOKEN, N8N_API_TOKEN, SOAR_API_TOKEN 환경변수를 검증한다.
+- 동일 IP의 과도한 호출 방지를 위해 분당 RATE_LIMIT(30회) 제한을 둔다."""
 import hashlib
 import hmac
+import ipaddress
 import os
 
 from flask import Blueprint, jsonify, request
@@ -20,15 +20,60 @@ bp = Blueprint("internal_api", __name__, url_prefix="/internal/api/v1")
 RATE_LIMIT = 30
 
 
-def token_fingerprint(token):
+def token_fingerprint(token: str) -> str:
     """토큰을 로그에 그대로 남기지 않고, 같은 토큰인지 알아볼 수 있는 짧은 지문만 남긴다."""
     return hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()[:10] if token else "-"
 
 
+def _extract_token(req) -> str:
+    """Authorization 헤더(Bearer) 또는 X-API-Token 헤더에서 토큰을 추출한다."""
+    header = req.headers.get("Authorization", "")
+    if header.lower().startswith("bearer "):
+        return header[7:].strip()
+    x_token = req.headers.get("X-API-Token", "").strip()
+    if x_token:
+        return x_token
+    return ""
+
+
+def _verify_token(token: str) -> bool:
+    """LAB_INTERNAL_API_TOKEN, N8N_API_TOKEN, SOAR_API_TOKEN 중 하나와 일치하는지 검증한다."""
+    if not token:
+        return False
+    candidates = [
+        t for t in [
+            os.environ.get("LAB_INTERNAL_API_TOKEN", ""),
+            os.environ.get("N8N_API_TOKEN", ""),
+            os.environ.get("SOAR_API_TOKEN", ""),
+        ] if t
+    ]
+    if not candidates:
+        return False
+    token_bytes = str(token).encode("utf-8")
+    return any(hmac.compare_digest(token_bytes, c.encode("utf-8")) for c in candidates)
+
+
+def _is_valid_target_ip(ip_str: str) -> tuple[bool, str]:
+    """차단 대상 IP 주소 유효성 검사 (루프백, 브로드캐스트 등 보호)."""
+    if not ip_str or not isinstance(ip_str, str):
+        return False, "IP 주소가 누락되었습니다."
+    clean_ip = ip_str.strip()
+    try:
+        addr = ipaddress.ip_address(clean_ip)
+    except ValueError:
+        return False, f"유효하지 않은 IP 주소 형식입니다: '{clean_ip}'"
+
+    if addr.is_loopback or clean_ip in ("127.0.0.1", "::1"):
+        return False, "루프백 주소(127.0.0.1, ::1 등)는 차단할 수 없습니다."
+    if addr.is_multicast or addr.is_unspecified:
+        return False, "유효하지 않은 대상 IP 주소입니다."
+
+    return True, clean_ip
+
+
 def internal_api(path, token, via, conversation_id=0):
     """내부 API 의 본체. (허용 여부, 응답 글자)를 돌려준다. 포털의 HTTP 경로(via=direct)와 AI 게이트웨이(via=gateway)가 같은 검사를 쓴다."""
-    expected = os.environ.get("LAB_INTERNAL_API_TOKEN", "")
-    valid = bool(expected) and hmac.compare_digest(str(token or "").encode(), expected.encode())
+    valid = _verify_token(token)
     clean_path = str(path or "")[:100]
     log_event("internal_api", "ALLOW" if valid else "DENY", "ok" if valid else "bad_token", via=via,
               token_fp=token_fingerprint(token), api_path=clean_path, conversation_id=conversation_id)
@@ -45,9 +90,146 @@ def flag():
     if ip_rate_limited(f"internal_api:{get_client_ip()}", RATE_LIMIT):
         log_event("rate_limited", "BLOCK", "internal_api_limit", via="direct")
         return jsonify(ok=False, error="rate_limited"), 429
-    header = request.headers.get("Authorization", "")
-    token = header[7:].strip() if header.lower().startswith("bearer ") else ""
+    token = _extract_token(request)
     ok, text = internal_api("/flag", token, "direct")
     if not ok:
         return jsonify(ok=False, error="unauthorized"), 401
     return jsonify(ok=True, flag=text)
+
+
+@bp.get("/blocked-ips")
+def list_blocked_ips():
+    """현재 활성화된 차단 IP 목록 조회 (n8n/SOAR 및 보안 관제용)."""
+    if ip_rate_limited(f"internal_api:{get_client_ip()}", RATE_LIMIT):
+        log_event("rate_limited", "BLOCK", "internal_api_limit", via="direct")
+        return jsonify(ok=False, error="rate_limited", message="요청 한도를 초과했습니다."), 429
+
+    token = _extract_token(request)
+    if not _verify_token(token):
+        log_event("internal_api", "DENY", "bad_token", via="direct",
+                  token_fp=token_fingerprint(token), api_path="/blocked-ips")
+        return jsonify(ok=False, error="unauthorized", message="유효하지 않은 인증 토큰입니다."), 401
+
+    try:
+        from . import db
+        rows = db.query_all(
+            "SELECT id, ip_address, reason, blocked_until, created_at, created_by "
+            "FROM blocked_ips WHERE blocked_until > NOW() ORDER BY blocked_until DESC LIMIT 200"
+        )
+        formatted = []
+        for r in rows:
+            b_until = r.get("blocked_until")
+            c_at = r.get("created_at")
+            formatted.append({
+                "id": r.get("id"),
+                "ip_address": r.get("ip_address"),
+                "reason": r.get("reason"),
+                "blocked_until": b_until.isoformat() if hasattr(b_until, "isoformat") else str(b_until),
+                "created_at": c_at.isoformat() if hasattr(c_at, "isoformat") else str(c_at),
+                "created_by": r.get("created_by")
+            })
+        return jsonify(ok=True, count=len(formatted), items=formatted)
+    except Exception as exc:
+        return jsonify(ok=False, error="db_error", message=str(exc)), 500
+
+
+@bp.post("/blocked-ips")
+def create_blocked_ip():
+    """악성 IP 차단 등록 API (n8n/SOAR 자동화 연동)."""
+    if ip_rate_limited(f"internal_api:{get_client_ip()}", RATE_LIMIT):
+        log_event("rate_limited", "BLOCK", "internal_api_limit", via="direct")
+        return jsonify(ok=False, error="rate_limited", message="요청 한도를 초과했습니다."), 429
+
+    token = _extract_token(request)
+    if not _verify_token(token):
+        log_event("internal_api", "DENY", "bad_token", via="direct",
+                  token_fp=token_fingerprint(token), api_path="/blocked-ips")
+        return jsonify(ok=False, error="unauthorized", message="유효하지 않은 인증 토큰입니다."), 401
+
+    payload = request.get_json(silent=True) or {}
+    raw_ip = payload.get("ip") or payload.get("ip_address") or request.form.get("ip") or request.form.get("ip_address", "")
+
+    valid, result_or_err = _is_valid_target_ip(raw_ip)
+    if not valid:
+        return jsonify(ok=False, error="invalid_ip", message=result_or_err), 400
+
+    ip = result_or_err
+    reason = str(payload.get("reason") or request.form.get("reason", "n8n_soar_block")).strip()[:100]
+    raw_minutes = payload.get("minutes") if "minutes" in payload else request.form.get("minutes", 30)
+    try:
+        minutes = int(raw_minutes)
+        if minutes <= 0 or minutes > 525600:
+            minutes = 30
+    except (ValueError, TypeError):
+        minutes = 30
+
+    created_by = str(payload.get("created_by") or request.form.get("created_by", "n8n_soar")).strip()[:50]
+
+    from . import security
+    success = security.block_ip(ip, reason=reason, minutes=minutes, created_by=created_by)
+    if not success:
+        return jsonify(ok=False, error="block_failed", message="IP 차단 처리에 실패했습니다."), 500
+
+    log_event("ip_block_api", "BLOCK", reason, via="direct",
+              blocked_ip=ip, minutes=minutes, created_by=created_by,
+              token_fp=token_fingerprint(token))
+
+    return jsonify(
+        ok=True,
+        message=f"IP {ip} 차단이 등록되었습니다 ({minutes}분간 유효).",
+        ip=ip,
+        reason=reason,
+        minutes=minutes,
+        created_by=created_by
+    ), 200
+
+
+def _handle_unblock(raw_ip: str, token: str):
+    valid, result_or_err = _is_valid_target_ip(raw_ip)
+    if not valid:
+        return jsonify(ok=False, error="invalid_ip", message=result_or_err), 400
+
+    ip = result_or_err
+    from . import security
+    success = security.unblock_ip(ip)
+    if not success:
+        return jsonify(ok=False, error="unblock_failed", message="IP 차단 해제 처리에 실패했습니다."), 500
+
+    log_event("ip_unblock_api", "ALLOW", "unblocked", via="direct",
+              unblocked_ip=ip, token_fp=token_fingerprint(token))
+
+    return jsonify(ok=True, message=f"IP {ip} 차단이 해제되었습니다.", ip=ip), 200
+
+
+@bp.post("/blocked-ips/unblock")
+def unblock_blocked_ip_post():
+    """차단 IP 해제 API (POST 요청 바디의 ip 지정)."""
+    if ip_rate_limited(f"internal_api:{get_client_ip()}", RATE_LIMIT):
+        log_event("rate_limited", "BLOCK", "internal_api_limit", via="direct")
+        return jsonify(ok=False, error="rate_limited", message="요청 한도를 초과했습니다."), 429
+
+    token = _extract_token(request)
+    if not _verify_token(token):
+        log_event("internal_api", "DENY", "bad_token", via="direct",
+                  token_fp=token_fingerprint(token), api_path="/blocked-ips/unblock")
+        return jsonify(ok=False, error="unauthorized", message="유효하지 않은 인증 토큰입니다."), 401
+
+    payload = request.get_json(silent=True) or {}
+    raw_ip = payload.get("ip") or payload.get("ip_address") or request.form.get("ip") or request.form.get("ip_address", "")
+    return _handle_unblock(raw_ip, token)
+
+
+@bp.delete("/blocked-ips/<path:ip>")
+def unblock_blocked_ip_delete(ip):
+    """차단 IP 해제 API (DELETE RESTful 경로)."""
+    if ip_rate_limited(f"internal_api:{get_client_ip()}", RATE_LIMIT):
+        log_event("rate_limited", "BLOCK", "internal_api_limit", via="direct")
+        return jsonify(ok=False, error="rate_limited"), 429
+
+    token = _extract_token(request)
+    if not _verify_token(token):
+        log_event("internal_api", "DENY", "bad_token", via="direct",
+                  token_fp=token_fingerprint(token), api_path=f"/blocked-ips/{ip}")
+        return jsonify(ok=False, error="unauthorized", message="유효하지 않은 인증 토큰입니다."), 401
+
+    return _handle_unblock(ip, token)
