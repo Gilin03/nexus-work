@@ -293,7 +293,7 @@ def _guard_output(user: dict, reply: str) -> str:
             markers=",".join(markers[:5]) if markers else "token",
             has_token=has_token,
         )
-        if not can(u, "doc.confidential"):
+        if ai_tools.is_defense_on() and not can(u, "doc.confidential"):
             reply = CONF_MARKER_RE.sub("[기밀식별자 차단됨]", reply)
             reply = INTERNAL_TOKEN_RE.sub("[내부토큰 차단됨]", reply)
     return reply

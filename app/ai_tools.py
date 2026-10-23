@@ -167,6 +167,18 @@ def reset_deny_correlation() -> None:
     return None
 
 
+TOOL_DOCUMENT_SEARCH = "document_search"
+TOOL_DOCUMENT_READ = "document_read"
+TOOL_RESTRICTED_DOCUMENT_READ = "restricted_document_read"
+TOOL_INTERNAL_API_CALL = "internal_api_call"
+
+
+def is_defense_on() -> bool:
+    """Return True if DEFENSE_MODE is enabled (default: on). When 'off', simulates attack success for demo."""
+    import os
+    return os.environ.get("DEFENSE_MODE", "on").strip().lower() != "off"
+
+
 def dispatch_tool(
     tool_name: str,
     user: dict,
@@ -174,9 +186,10 @@ def dispatch_tool(
     session_id: str,
     trigger_source: str = "user_request",
     trigger_resource_id: str | None = None,
+    args: dict | None = None,
 ) -> dict:
     """Authorize and run one allowlisted tool; denied calls never execute its database query."""
-    if tool_name != TOOL_RESTRICTED_DOCUMENT_READ:
+    if tool_name not in (TOOL_RESTRICTED_DOCUMENT_READ, TOOL_DOCUMENT_SEARCH, TOOL_DOCUMENT_READ, TOOL_INTERNAL_API_CALL):
         log_event(
             "agent_tool_call", "DENY", "tool_not_allowlisted",
             source_component="security_gateway", severity="high",
@@ -186,7 +199,50 @@ def dispatch_tool(
         return {"decision": "DENY", "documents": []}
 
     principal = _authoritative_principal(user)
-    allowed = bool(principal and can(principal, "doc.confidential"))
+    defense_active = is_defense_on()
+
+    # n8n 이 설정한 AI 제한(users.ai_restricted=1)은 DEFENSE_MODE 와 무관하게 항상 적용된다.
+    user_id = (principal or {}).get("id")
+    if user_id:
+        res_row = db.query_one("SELECT ai_restricted FROM users WHERE id = %s", (user_id,))
+        if res_row and res_row.get("ai_restricted"):
+            log_event(
+                "agent_tool_call", "DENY", "user_ai_restricted",
+                source_component="security_gateway", severity="high",
+                session_id=session_id, tool_name=tool_name,
+                resource_class="confidential", trigger_source="user_request",
+            )
+            return {"decision": "DENY", "documents": []}
+
+    if tool_name == TOOL_DOCUMENT_SEARCH:
+        query = str((args or {}).get("query", ""))[:50]
+        q_param = f"%{query}%"
+        docs = db.query_all("SELECT id, title FROM documents WHERE title LIKE %s OR body LIKE %s ORDER BY id DESC LIMIT 5", (q_param, q_param))
+        posts = db.query_all("SELECT id, title FROM posts WHERE title LIKE %s OR body LIKE %s ORDER BY id DESC LIMIT 5", (q_param, q_param))
+        return {"decision": "ALLOW", "documents": docs + posts}
+
+    if tool_name == TOOL_DOCUMENT_READ:
+        doc_id = (args or {}).get("id")
+        doc = db.query_one("SELECT id, title, body FROM documents WHERE id = %s", (doc_id,)) if doc_id else None
+        return {"decision": "ALLOW" if doc else "DENY", "document": doc}
+
+    if tool_name == TOOL_INTERNAL_API_CALL:
+        allowed = (not defense_active) or bool(principal and principal.get("role") == "service_account")
+        if not allowed:
+            log_event(
+                "agent_tool_call", "DENY", "service_account_required",
+                source_component="security_gateway", severity="high",
+                session_id=session_id, tool_name=tool_name,
+            )
+            return {"decision": "DENY", "result": "서비스 계정 전용 도구입니다."}
+        api_path = str((args or {}).get("path", "/flag"))
+        token = str((args or {}).get("token", ""))
+        from . import internal_api
+        ok, res_text = internal_api.internal_api(api_path, token, via="gateway")
+        return {"decision": "ALLOW" if ok else "DENY", "result": res_text}
+
+    # 기밀 문서 열람 (restricted_document_read)
+    allowed = (not defense_active) or bool(principal and can(principal, "doc.confidential"))
     safe_trigger = "indirect_prompt_injection" if trigger_source == "indirect_prompt_injection" else "user_request"
     resource_id = None
     if safe_trigger == "indirect_prompt_injection":
@@ -227,6 +283,7 @@ def dispatch_tool(
         "SELECT id, title, body, created_at FROM confidential_documents ORDER BY id DESC LIMIT 5",
         conf=True,
     )
-    log_event("agent_tool_call", "ALLOW", "permission_granted", **base_fields)
+    reason = "permission_granted" if (principal and can(principal, "doc.confidential")) else "defense_off_allow"
+    log_event("agent_tool_call", "ALLOW", reason, **base_fields)
     log_event("confidential_access", "ALLOW", "ai_context", resource="confidential_documents", rows=len(documents))
     return {"decision": "ALLOW", "documents": documents}

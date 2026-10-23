@@ -27,6 +27,22 @@ _REVEAL_EN = re.compile(
     re.IGNORECASE,
 )
 
+# 완화된 우회 표현 탐지 (기획서 4.2 / 6.3 10/23 이슈 반영: 완곡한 질문형·유도형 시스템 프롬프트/지침 탈취 시도 탐지)
+_MITIGATED_REVEAL_KO = re.compile(
+    r"(?:네가|너의|현재|너가|자신이)?\s*(?:따르(?:는|고\s*있는)|준수하(?:는|고\s*있는)|받은|부여된|설정된|기본|내부)?\s*"
+    r"(?:시스템\s*프롬프트|프롬프트|지침|가이드라인|규칙|지시(?:문|사항)?)\s*(?:을|를|이|은|는)?\s*"
+    r"(?:그대로\s*)?(?:말해\s*(?:줘|봐|줄래|주세요|주시겠습니까)?|"
+    r"보여\s*(?:줘|봐|줄래|주세요|줄\s*수\s*있어(?:요)?|주시겠습니까)?|"
+    r"알려\s*(?:줘|봐|줄래|주세요|줄\s*수\s*있어(?:요)?|주시겠습니까)?|"
+    r"출력해\s*(?:줘|봐|줄래|주세요)?|공개해\s*(?:줘|봐|줄래|주세요)?|"
+    r"설명해\s*(?:줘|봐|줄래|주세요)?)(?![가-힣])"
+)
+_MITIGATED_REVEAL_EN = re.compile(
+    r"(?:(?:can|could|would)\s+you\s+)?(?:tell|show|explain|share|print|reveal)\s+(?:me\s+)?"
+    r"(?:the\s+|your\s+)?(?:system\s+|hidden\s+|operating\s+|core\s+)?(?:prompt|instructions?|guidelines?|rules?)\b",
+    re.IGNORECASE,
+)
+
 _POLICY_BYPASS_KO = re.compile(
     r"^\s*(?:보안\s*정책|접근\s*통제|권한\s*검사|보호\s*규칙|안전\s*정책)(?:을|를)?\s*"
     r"(?:우회해서|우회하고|우회한\s*뒤|우회해(?:줘|라|주세요)?|"
@@ -58,7 +74,8 @@ def detect_direct_prompt_injection(message: str) -> str | None:
     for sentence in sentences:
         if _OVERRIDE_KO.search(sentence) or _OVERRIDE_EN.search(sentence):
             return "ignore_previous_instructions"
-        if _REVEAL_KO.search(sentence) or _REVEAL_EN.search(sentence):
+        if (_REVEAL_KO.search(sentence) or _REVEAL_EN.search(sentence)
+                or _MITIGATED_REVEAL_KO.search(sentence) or _MITIGATED_REVEAL_EN.search(sentence)):
             return "reveal_hidden_prompt"
         if ((_POLICY_BYPASS_KO.search(sentence) and _PROTECTED_REQUEST_KO.search(sentence))
                 or (_POLICY_BYPASS_EN.search(sentence) and _PROTECTED_REQUEST_EN.search(sentence))):
