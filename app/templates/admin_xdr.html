@@ -4,7 +4,10 @@
 <section class="sheet">
   <h1>AI-XDR 2차 판정</h1>
   <p class="hint">보안 이벤트 메타데이터만 평가합니다. AI 판정은 허용된 정책 gate와 관리자 결정 없이 IP 차단을 실행하지 않습니다.</p>
-  <p><a class="btn" href="{{ url_for('admin.audit_log') }}">보안 감사 화면</a></p>
+  <div style="margin-bottom: 1rem; display: flex; gap: 0.5rem;">
+    <a class="btn" href="{{ url_for('admin.audit_log') }}">📊 보안 대시보드</a>
+    <a class="btn" href="{{ url_for('admin.list_blocked_ips') }}">🚫 차단 IP 관리</a>
+  </div>
   {% if not xdr_enabled %}<p class="notice" role="status">AI-XDR 수집은 설정에서 비활성화되어 있습니다.</p>{% endif %}
   {% if unavailable %}<p class="alert" role="alert">AI-XDR 저장소를 사용할 수 없습니다. 테이블 migration 상태를 확인하세요.</p>{% endif %}
   {% if result %}<p class="notice" role="status">결정이 기록되었습니다: {{ result }}</p>{% endif %}

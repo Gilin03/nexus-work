@@ -31,7 +31,7 @@
       {% for name, n in recent %}<tr><th scope="row"><a href="{{ url_for('admin.audit_log', type=name) }}">{{ name }}</a></th><td>{{ n }}건</td></tr>{% endfor %}
     </tbody></table>
     {% else %}<p class="hint">최근 24시간 기록이 없습니다.</p>{% endif %}
-    {% if can('security.dashboard') %}<p><a href="{{ url_for('admin.audit_log') }}">보안 대시보드 열기</a></p>{% endif %}
+    {% if can('security.dashboard') %}<p><a href="{{ url_for('admin.audit_log') }}">보안 대시보드 열기</a> · <a href="{{ url_for('admin.xdr_assessments') }}">🛡️ AI-XDR 2차 판정 열기</a></p>{% endif %}
   </section>
 </div>
 {% endblock %}
