@@ -66,7 +66,7 @@ class Config:
         self.GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b").strip()
 
         # AI-XDR is opt-in and starts in dry-run. An unset/invalid confidence keeps auto response closed.
-        self.XDR_ENABLED = os.environ.get("XDR_ENABLED", "0") == "1"
+        self.XDR_ENABLED = os.environ.get("XDR_ENABLED", "1") == "1"
         self.XDR_AUTO_ENABLED = os.environ.get("XDR_AUTO_ENABLED", "0") == "1"
         self.XDR_RESPONSE_MODE = os.environ.get("XDR_RESPONSE_MODE", "dry-run").strip().lower()
         self.XDR_AI_PROVIDER = os.environ.get("XDR_AI_PROVIDER", "auto").strip().lower()

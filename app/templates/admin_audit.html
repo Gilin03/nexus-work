@@ -11,6 +11,9 @@
     </div>
     <div class="soc-hero-actions">
       <a href="{{ url_for('admin.xdr_assessments') }}" class="soc-btn soc-btn-outline">AI-XDR 평가</a>
+      <a href="{{ url_for('admin.xdr_assessments') }}" class="soc-btn soc-btn-outline">
+        🛡️ AI-XDR 2차 판정
+      </a>
       <a href="{{ url_for('admin.list_blocked_ips') }}" class="soc-btn soc-btn-danger">
         차단 IP 관리 ({{ blocked_ips_count }}건 활성)
       </a>
