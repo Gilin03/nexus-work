@@ -340,18 +340,17 @@ def _model_response(summary, assessment_id):
         key = cfg.get("GROQ_API_KEY") or ""
         if not key:
             raise RuntimeError("provider_unavailable")
-        request_body = json.dumps({
-            "model": cfg.get("GROQ_MODEL", "openai/gpt-oss-120b"),
-            "messages": [{"role": "system", "content": system_text}, {"role": "user", "content": user_text}],
-            "temperature": 0,
-            "response_format": {"type": "json_object"},
-        }).encode("utf-8")
-        request = urllib.request.Request(
-            "https://api.groq.com/openai/v1/chat/completions", data=request_body,
-            headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"}, method="POST",
+        from .ai import _post_json
+        response_json = _post_json(
+            "https://api.groq.com/openai/v1/chat/completions",
+            {
+                "model": cfg.get("GROQ_MODEL", "openai/gpt-oss-120b"),
+                "messages": [{"role": "system", "content": system_text}, {"role": "user", "content": user_text}],
+                "temperature": 0,
+                "response_format": {"type": "json_object"},
+            },
+            {"Authorization": "Bearer " + key}, timeout,
         )
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            response_json = json.loads(response.read().decode("utf-8"))
         return response_json["choices"][0]["message"]["content"]
     if provider == "ollama":
         base_url = str(cfg.get("OLLAMA_BASE_URL", "")).rstrip("/")
