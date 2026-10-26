@@ -355,6 +355,7 @@ def check_csrf():
         return
     if (request.path.startswith("/api/v1/")
             or request.path.startswith("/internal/api/v1/blocked-ips")
+            or request.path.startswith("/internal/api/v1/ai-xdr/")
             or request.path == "/internal/api/v1/ip-block"):
         # Bearer 인증 API는 브라우저 세션 쿠키를 신뢰하지 않아 CSRF 검사가 필요 없다.
         return

@@ -637,3 +637,41 @@ def remove_blocked_ip(ip):
     security.unblock_ip(ip)
     log_event("admin_action", "ALLOW", "unblock_ip", action="unblock_ip", target=ip)
     return redirect(url_for("admin.list_blocked_ips"), 303)
+
+
+@bp.get("/xdr")
+@permission_required("security.dashboard")
+def xdr_assessments():
+    rows = []
+    unavailable = False
+    if current_app.config.get("XDR_ENABLED"):
+        from . import ai_xdr
+        try:
+            rows = ai_xdr.list_assessments(50)
+        except pymysql.MySQLError:
+            unavailable = True
+    return render_template(
+        "admin_xdr.html", assessments=rows, xdr_enabled=current_app.config.get("XDR_ENABLED", False),
+        unavailable=unavailable, result=request.args.get("result", ""),
+    )
+
+
+@bp.post("/xdr/assessments/<assessment_id>/decision")
+@permission_required("security.dashboard")
+def decide_xdr_assessment(assessment_id):
+    from . import ai_xdr
+    try:
+        result = ai_xdr.decide_assessment(
+            assessment_id, request.form.get("decision", ""), int(g.user["id"]),
+            g.user.get("username", "admin"),
+        )
+    except ValueError:
+        abort(400)
+    except LookupError:
+        abort(404)
+    except RuntimeError:
+        abort(409)
+    except pymysql.MySQLError as exc:
+        log_event("xdr_assessment_decision", "ERROR", type(exc).__name__, assessment_id=assessment_id)
+        abort(503)
+    return redirect(url_for("admin.xdr_assessments", result=result["status"].lower()), 303)
