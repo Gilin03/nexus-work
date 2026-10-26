@@ -144,6 +144,23 @@
     else if (e.decision === "WARN" || e.decision === "ERROR") pill.classList.add("pill-warn");
     else pill.classList.add("pill-allow");
     tdDec.appendChild(pill);
+    if (e.threat_score !== undefined && e.threat_score !== null && e.threat_score !== '') {
+      var aiPill = document.createElement('span');
+      var score = parseInt(e.threat_score, 10);
+      aiPill.className = 'pill';
+      if (!isNaN(score) && score >= 80) {
+        aiPill.classList.add('pill-ai-danger');
+      } else if (!isNaN(score) && score >= 50) {
+        aiPill.classList.add('pill-ai-warn');
+      } else {
+        aiPill.classList.add('pill-ai-safe');
+      }
+      aiPill.textContent = '🤖 AI ' + e.threat_score + '점';
+      if (e.verdict) {
+        aiPill.title = 'AI 판정: ' + e.verdict + ' (위협도 ' + e.threat_score + '점)';
+      }
+      tdDec.appendChild(aiPill);
+    }
     tr.appendChild(tdDec);
 
     // 7. Reason

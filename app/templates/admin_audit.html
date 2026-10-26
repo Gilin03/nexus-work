@@ -218,6 +218,15 @@
             {% else %}
               <span class="pill pill-allow">{{ e.decision }}</span>
             {% endif %}
+            {% if e.threat_score is defined and e.threat_score is not none %}
+              {% if e.threat_score >= 80 %}
+                <span class="pill pill-ai-danger" title="AI 판정: {{ e.verdict or 'MALICIOUS' }} (위협도 {{ e.threat_score }}점)">🤖 AI {{ e.threat_score }}점</span>
+              {% elif e.threat_score >= 50 %}
+                <span class="pill pill-ai-warn" title="AI 판정: {{ e.verdict or 'SUSPICIOUS' }} (위협도 {{ e.threat_score }}점)">🤖 AI {{ e.threat_score }}점</span>
+              {% else %}
+                <span class="pill pill-ai-safe" title="AI 판정: {{ e.verdict or 'BENIGN' }} (위협도 {{ e.threat_score }}점)">🤖 AI {{ e.threat_score }}점</span>
+              {% endif %}
+            {% endif %}
           </td>
           <td>{{ e.reason }}</td>
           <td class="mono path-cell">{{ e.method }} {{ e.path }}</td>
@@ -232,6 +241,8 @@
               data-reason="{{ e.reason }}"
               data-method="{{ e.method }}"
               data-path="{{ e.path }}"
+              data-threat-score="{{ e.threat_score or '' }}"
+              data-verdict="{{ e.verdict or '' }}"
               data-extra="{{ e.extra }}"
               aria-haspopup="dialog">상세</button>
             <div class="audit-raw-hidden"><pre class="raw">{{ e.raw }}</pre></div>

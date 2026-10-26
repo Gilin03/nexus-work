@@ -2204,6 +2204,9 @@ pre.raw {
 .pill-warn, .pill-error { background: #fef3c7; color: #b45309; border: 1px solid #fde68a; }
 .pill-deny { background: #fee2e2; color: #b91c1c; border: 1px solid #fecaca; }
 .pill-block { background: #c8102e; color: #ffffff; border: 1px solid #991b1b; }
+.pill-ai-danger { background: #7f1d1d; color: #fecaca; border: 1px solid #ef4444; font-weight: 700; margin-left: 4px; font-size: 0.72rem; }
+.pill-ai-warn { background: #78350f; color: #fde68a; border: 1px solid #f59e0b; font-weight: 700; margin-left: 4px; font-size: 0.72rem; }
+.pill-ai-safe { background: #064e3b; color: #a7f3d0; border: 1px solid #10b981; font-weight: 700; margin-left: 4px; font-size: 0.72rem; }
 
 /* Monospace & Actions */
 .mono {

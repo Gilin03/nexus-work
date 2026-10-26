@@ -37,3 +37,17 @@ def test_audit_stream_requires_permission(client):
     resp = client.get("/admin/audit/stream")
     # Redirects to login (302/303) or Forbidden (403)
     assert resp.status_code in (302, 303, 403)
+
+
+def test_audit_event_ai_fields_shaping():
+    record = {
+        'ts': '2026-10-26T10:00:00+00:00',
+        'event_type': 'ip_blocked',
+        'decision': 'BLOCK',
+        'src_ip': '203.0.113.88',
+        'threat_score': 88,
+        'verdict': 'MALICIOUS'
+    }
+    shaped = audit._shape(record)
+    assert shaped['threat_score'] == 88
+    assert shaped['verdict'] == 'MALICIOUS'

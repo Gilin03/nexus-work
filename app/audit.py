@@ -68,6 +68,15 @@ def _shape(e):
     extra = " ".join(f"{k}={str(v)[:80]}" for k, v in e.items() if k not in STANDARD)
     row = {k: str(e.get(k, "-"))[:200] for k in STANDARD if k != "ts"}
     row["time"], row["extra"], row["raw_ts"] = shown, extra[:300], ts
+    t_score = e.get("threat_score") if "threat_score" in e else e.get("ai_score")
+    verdict = e.get("verdict") if "verdict" in e else e.get("ai_verdict")
+    if t_score is not None:
+        try:
+            row["threat_score"] = int(t_score)
+        except (ValueError, TypeError):
+            row["threat_score"] = str(t_score)
+    if verdict:
+        row["verdict"] = str(verdict)
     return row
 
 
