@@ -44,7 +44,8 @@ def test_every_admin_route_requires_admin(aapp, root):
         "/admin/users", "/admin/users/new", "/admin/users/<int:user_id>/role", "/admin/users/<int:user_id>/unlock",
         "/admin/users/<int:user_id>/lock", "/admin/users/<int:user_id>/reset-password", "/admin/overview", "/admin/audit",
         "/admin/audit/export.csv", "/admin/users/<int:user_id>/title", "/admin/users/<int:user_id>/dept", "/admin/users/<int:user_id>/delete", "/admin/users/<int:user_id>/restore", "/admin/permissions",
-        "/admin/blocked-ips", "/admin/blocked-ips/<path:ip>/unblock", "/admin/audit/stream"}
+        "/admin/blocked-ips", "/admin/blocked-ips/<path:ip>/unblock", "/admin/audit/stream",
+        "/admin/xdr", "/admin/xdr/assessments/<assessment_id>/decision"}
     before = snapshot(root)
     anon, emp, mgr = aapp.test_client(), as_user(aapp, "zz_emp"), as_user(aapp, "zz_mgr")
     for rule in rules:

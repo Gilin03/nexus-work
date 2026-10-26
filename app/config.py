@@ -1,3 +1,4 @@
+import math
 import os
 from datetime import timedelta
 from pathlib import Path
@@ -63,6 +64,32 @@ class Config:
         self.GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash").strip()
         self.GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
         self.GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-120b").strip()
+
+        # AI-XDR is opt-in and starts in dry-run. An unset/invalid confidence keeps auto response closed.
+        self.XDR_ENABLED = os.environ.get("XDR_ENABLED", "0") == "1"
+        self.XDR_AUTO_ENABLED = os.environ.get("XDR_AUTO_ENABLED", "0") == "1"
+        self.XDR_RESPONSE_MODE = os.environ.get("XDR_RESPONSE_MODE", "dry-run").strip().lower()
+        self.XDR_AI_PROVIDER = os.environ.get("XDR_AI_PROVIDER", "auto").strip().lower()
+        self.XDR_AI_TIMEOUT = self._int_setting("XDR_AI_TIMEOUT", 30)
+        self.XDR_TRIAGE_WINDOW_SECONDS = self._int_setting("XDR_TRIAGE_WINDOW_SECONDS", 180)
+        self.XDR_MAX_EVENT_AGE_SECONDS = self._int_setting("XDR_MAX_EVENT_AGE_SECONDS", 300)
+        self.XDR_AUTO_MIN_SCORE = self._int_setting("XDR_AUTO_MIN_SCORE", 80)
+        self.XDR_DAY_START_HOUR = self._int_setting("XDR_DAY_START_HOUR", 8)
+        self.XDR_DAY_END_HOUR = self._int_setting("XDR_DAY_END_HOUR", 20)
+        weekend_mode = os.environ.get("XDR_WEEKEND_MODE", "approval").strip().lower()
+        self.XDR_WEEKEND_MODE = weekend_mode if weekend_mode in {"approval", "night_auto"} else "invalid"
+        try:
+            confidence = float(os.environ.get("XDR_AUTO_MIN_CONFIDENCE", "").strip())
+            self.XDR_AUTO_MIN_CONFIDENCE = confidence if math.isfinite(confidence) and 0 <= confidence <= 1 else None
+        except (TypeError, ValueError):
+            self.XDR_AUTO_MIN_CONFIDENCE = None
+
+    @staticmethod
+    def _int_setting(name, default):
+        try:
+            return int(os.environ.get(name, str(default)).strip())
+        except (TypeError, ValueError):
+            return None
 
     def as_flask(self):
         return {k: v for k, v in vars(self).items() if k.isupper()}

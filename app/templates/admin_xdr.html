@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}AI-XDR 평가 · NEXUS SOC{% endblock %}
+{% block content %}
+<section class="sheet">
+  <h1>AI-XDR 2차 판정</h1>
+  <p class="hint">보안 이벤트 메타데이터만 평가합니다. AI 판정은 허용된 정책 gate와 관리자 결정 없이 IP 차단을 실행하지 않습니다.</p>
+  <p><a class="btn" href="{{ url_for('admin.audit_log') }}">보안 감사 화면</a></p>
+  {% if not xdr_enabled %}<p class="notice" role="status">AI-XDR 수집은 설정에서 비활성화되어 있습니다.</p>{% endif %}
+  {% if unavailable %}<p class="alert" role="alert">AI-XDR 저장소를 사용할 수 없습니다. 테이블 migration 상태를 확인하세요.</p>{% endif %}
+  {% if result %}<p class="notice" role="status">결정이 기록되었습니다: {{ result }}</p>{% endif %}
+  {% if assessments %}
+  <div class="scroll">
+    <table class="audit">
+      <thead><tr><th>마지막 시각</th><th>출발지/계정</th><th>Rule / 이벤트</th><th>평가</th><th>상태·정책</th><th>기존 티켓</th><th>관리자 결정</th></tr></thead>
+      <tbody>
+      {% for a in assessments %}
+        <tr>
+          <td>{{ a.last_seen_kst or a.first_seen_kst }}</td>
+          <td class="mono">{{ a.src_ip or 'IP 없음' }}<br>{{ a.user_names | join(', ') }}</td>
+          <td>{{ a.rule_ids | join(', ') }}<br>{{ a.event_types | join(', ') }}<br>{{ a.event_count }}건</td>
+          <td>{{ a.verdict }}<br>점수 {{ a.threat_score }} · 신뢰도 {{ '%.3f'|format(a.confidence or 0) }}<br>{{ a.reasoning }}</td>
+          <td>{{ a.status }}<br>{{ a.policy_mode }} · {{ a.policy_reason }}
+            {% if a.response_result and a.response_result.auto_candidate %}<br><strong>자동 차단 후보</strong>{% endif %}
+            <br>권고: {{ a.recommended_actions | join(', ') }}</td>
+          <td>{% if a.incident_ticket_id %}NX-DB-{{ '%06d'|format(a.incident_ticket_id) }}{% else %}연결 없음{% endif %}</td>
+          <td>
+          {% if a.status == 'PENDING' %}
+            <form method="post" action="{{ url_for('admin.decide_xdr_assessment', assessment_id=a.assessment_id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn primary" name="decision" value="APPROVED">승인</button>
+              <button class="btn" name="decision" value="REJECTED">거부</button>
+              <button class="btn" name="decision" value="FALSE_POSITIVE">오탐</button>
+            </form>
+          {% else %}{{ a.decided_at or '처리 완료' }}{% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}<p class="hint">표시할 AI-XDR 평가가 없습니다.</p>{% endif %}
+</section>
+{% endblock %}

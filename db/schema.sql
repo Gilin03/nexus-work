@@ -574,3 +574,57 @@ CREATE TABLE IF NOT EXISTS blocked_ips (
   created_by    VARCHAR(50)  NOT NULL DEFAULT 'system',
   INDEX idx_ip_lookup (ip_address, blocked_until)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS security_xdr_assessments (
+  assessment_id       CHAR(36) NOT NULL PRIMARY KEY,
+  window_key          CHAR(64) NOT NULL UNIQUE,
+  group_key           VARCHAR(255) NOT NULL,
+  incident_ticket_id  BIGINT UNSIGNED NULL,
+  src_ip              VARCHAR(45) NOT NULL DEFAULT '',
+  user_names          JSON NOT NULL,
+  rule_ids            JSON NOT NULL,
+  event_types         JSON NOT NULL,
+  event_count         INT UNSIGNED NOT NULL,
+  first_seen          DATETIME(6) NOT NULL,
+  last_seen           DATETIME(6) NOT NULL,
+  event_summary       JSON NOT NULL,
+  threat_score        TINYINT UNSIGNED NULL,
+  confidence          DECIMAL(4,3) NULL,
+  verdict             ENUM('BENIGN','SUSPICIOUS','MALICIOUS','REVIEW_REQUIRED') NOT NULL DEFAULT 'REVIEW_REQUIRED',
+  reasoning           VARCHAR(500) NOT NULL DEFAULT '',
+  recommended_actions JSON NOT NULL,
+  policy_mode         VARCHAR(24) NOT NULL DEFAULT 'dry-run',
+  policy_reason       VARCHAR(120) NOT NULL DEFAULT '',
+  status              ENUM('PROCESSING','PENDING','APPROVED','REJECTED','FALSE_POSITIVE','NO_ACTION','AUTO_EXECUTED') NOT NULL DEFAULT 'PROCESSING',
+  response_result     JSON NULL,
+  created_at          DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  decided_by          INT UNSIGNED NULL,
+  decided_at          DATETIME(6) NULL,
+  KEY idx_xdr_status_created (status, created_at),
+  KEY idx_xdr_ticket (incident_ticket_id),
+  CONSTRAINT fk_xdr_assessment_ticket FOREIGN KEY (incident_ticket_id)
+    REFERENCES security_incident_tickets(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+CREATE TABLE IF NOT EXISTS security_xdr_events (
+  alert_id            VARCHAR(160) NOT NULL PRIMARY KEY,
+  window_key          CHAR(64) NOT NULL,
+  group_key           VARCHAR(255) NOT NULL,
+  window_start        DATETIME(6) NOT NULL,
+  incident_ticket_id  BIGINT UNSIGNED NULL,
+  src_ip              VARCHAR(45) NOT NULL DEFAULT '',
+  user_name           VARCHAR(64) NOT NULL DEFAULT '',
+  rule_id             VARCHAR(8) NOT NULL,
+  event_type          VARCHAR(80) NOT NULL,
+  severity            VARCHAR(16) NOT NULL DEFAULT '',
+  event_count         INT UNSIGNED NOT NULL DEFAULT 1,
+  occurred_at         DATETIME(6) NOT NULL,
+  event_payload       JSON NOT NULL,
+  assessment_id       CHAR(36) NULL,
+  created_at          DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  KEY idx_xdr_pending_window (assessment_id, window_start),
+  KEY idx_xdr_group_time (group_key, occurred_at),
+  KEY idx_xdr_event_ticket (incident_ticket_id),
+  CONSTRAINT fk_xdr_event_assessment FOREIGN KEY (assessment_id)
+    REFERENCES security_xdr_assessments(assessment_id) ON DELETE SET NULL
+) ENGINE=InnoDB;

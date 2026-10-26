@@ -11,7 +11,7 @@ import hmac
 import ipaddress
 import os
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request
 
 from . import security
 from .security import get_client_ip, ip_rate_limited, log_event
@@ -298,3 +298,46 @@ def automated_ip_block():
 
     security.log_event("ip_block_automation", "BLOCK", block_reason, action=rule_id, resource=ip)
     return jsonify(ok=True, blocked=True, ip_address=ip, rule_id=rule_id, duration_minutes=duration)
+
+
+def _authorize_xdr(path):
+    if ip_rate_limited(f"internal_api:{get_client_ip()}", RATE_LIMIT):
+        log_event("rate_limited", "BLOCK", "internal_api_limit", via="direct")
+        return jsonify(ok=False, error="rate_limited"), 429
+    token = _extract_token(request)
+    authorized, _ = internal_api(path, token, "direct")
+    if not authorized:
+        return jsonify(ok=False, error="unauthorized"), 401
+    if not current_app.config.get("XDR_ENABLED", False):
+        return jsonify(ok=False, error="xdr_disabled"), 503
+    return None
+
+
+@bp.post("/ai-xdr/events")
+def ingest_ai_xdr_event():
+    denied = _authorize_xdr("/ai-xdr/events")
+    if denied:
+        return denied
+    from . import ai_xdr
+    try:
+        result = ai_xdr.ingest_event(request.get_json(silent=True))
+    except ValueError as exc:
+        return jsonify(ok=False, error=str(exc)), 422
+    except Exception as exc:  # do not return database/provider details to the caller.
+        log_event("xdr_event_intake", "ERROR", type(exc).__name__)
+        return jsonify(ok=False, error="intake_failed"), 503
+    return jsonify(ok=True, **result), 202
+
+
+@bp.post("/ai-xdr/process")
+def process_ai_xdr_windows():
+    denied = _authorize_xdr("/ai-xdr/process")
+    if denied:
+        return denied
+    from . import ai_xdr
+    try:
+        result = ai_xdr.process_ready_windows()
+    except Exception as exc:  # keeps service diagnostics private; no raw event data is returned.
+        log_event("xdr_processing", "ERROR", type(exc).__name__)
+        return jsonify(ok=False, error="processing_failed"), 503
+    return jsonify(ok=True, **result)
