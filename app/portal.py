@@ -200,3 +200,16 @@ def attachment(att_id):
     # 저장명은 서버가 만든 uuid 라서 경로 조작이 불가능하고, 항상 첨부(다운로드)로만 내려 브라우저가 실행·렌더링하지 않는다.
     return uploads.send_stored(directory, row["stored_name"], as_attachment=True,
                                download_name=row["orig_name"], mimetype=row["mime"])
+
+
+# ---------- pfSense URL Table 연동 피드 ----------
+@bp.get("/feeds/xdr-blocked-ips.txt")
+def feed_xdr_blocked_ips():
+    """pfSense URL Table 및 외부 방화벽 연동용 실시간 차단 IP 텍스트 피드."""
+    from flask import Response
+    try:
+        rows = db.query_all("SELECT ip_address FROM blocked_ips WHERE blocked_until > NOW() ORDER BY blocked_until DESC LIMIT 500")
+        plain_text = "\n".join(str(r.get("ip_address")) for r in rows if r.get("ip_address"))
+    except Exception:
+        plain_text = ""
+    return Response(plain_text + ("\n" if plain_text else ""), mimetype="text/plain")
