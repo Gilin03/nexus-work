@@ -42,6 +42,7 @@
     ('관리 현황', url_for('admin.overview'), ep == 'admin.overview', g.user.role == 'admin'),
     ('사용자 관리', url_for('admin.users'), ep in ('admin.users', 'admin.user_new', 'admin.change_role', 'admin.unlock', 'admin.lock', 'admin.reset_password'), g.user.role == 'admin'),
     ('보안 대시보드', url_for('admin.audit_log'), ep.startswith('admin.audit'), can('security.dashboard')),
+    ('AI-XDR 판정', url_for('admin.xdr_assessments'), ep.startswith('admin.xdr'), can('security.dashboard')),
     ('차단 IP 관리', url_for('admin.list_blocked_ips'), ep.startswith('admin.list_blocked_ips'), can('security.dashboard')),
     ('권한 현황', url_for('admin.permissions'), ep == 'admin.permissions', g.user.role == 'admin')]),
 ] %}
@@ -56,7 +57,7 @@
   ('portal.confidential', '자료', '기밀 문서함'), ('portal.employees', '자료', '주소록'),
   ('portal.board', '자료', '게시판'), ('portal.post', '자료', '게시판'), ('portal.attachment', '자료', '게시판'),
   ('hr.card', '인사', '인사카드'), ('hr.org', '인사', '조직도'), ('hr.attendance', '인사', '근태관리'),
-  ('hr.check_', '인사', '근태관리'), ('hr.leave', '인사', '휴가관리'), ('erp.payroll', '인사', '급여'), ('admin.overview', '관리', '관리 현황'), ('admin.audit', '관리', '보안 대시보드'),
+  ('hr.check_', '인사', '근태관리'), ('hr.leave', '인사', '휴가관리'), ('erp.payroll', '인사', '급여'), ('admin.overview', '관리', '관리 현황'), ('admin.audit', '관리', '보안 대시보드'), ('admin.xdr', '관리', 'AI-XDR 판정'),
   ('admin.permissions', '관리', '권한 현황'), ('admin.', '관리', '사용자 관리'), ('auth.change_password', '계정', '비밀번호 변경'), ('profile.', '계정', '프로필 사진')] %}
 {% set here = namespace(group='', label='', rail='업무') %}
 {% for prefix, group, label in places if not here.label and ep.startswith(prefix) %}
