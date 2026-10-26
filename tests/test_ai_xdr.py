@@ -1,0 +1,463 @@
+import json
+from datetime import datetime, timezone
+
+import pytest
+
+from app import ai_xdr
+
+
+def payload(alert_id="alert-1", rule_id="R8", src_ip="192.168.7.77", severity_location="rule"):
+    event = {
+        "event_type": "not_found",
+        "src_ip": src_ip,
+        "user": "scanner",
+        "path": "/r8-test-1",
+        "count": 4,
+        "severity": "info",
+        "message": "must not be retained",
+        "prompt": "must not be retained",
+    }
+    rule = {"id": rule_id}
+    if severity_location == "rule":
+        rule["severity"] = "info"
+    return {
+        "schema_version": "1.1",
+        "alert_id": alert_id,
+        "rule_id": rule_id,
+        "timestamp": "2026-10-26T01:00:00Z",
+        "ticket_id": "NX-DB-000025",
+        "rule": rule,
+        "event": event,
+        "message": "must not be retained",
+    }
+
+
+def test_normalize_accepts_rule_or_event_severity_and_only_keeps_allowlisted_fields():
+    base = datetime(2026, 10, 26, 1, 2, tzinfo=timezone.utc)
+    from_rule = ai_xdr.normalize_event_payload(payload(), received_at=base)
+    from_event = ai_xdr.normalize_event_payload(
+        payload(alert_id="alert-2", severity_location="event"), received_at=base
+    )
+
+    assert from_rule["severity"] == from_event["severity"] == "info"
+    assert from_rule["event"]["path"] == "/r8-test-1"
+    assert "message" not in from_rule["event"]
+    assert "prompt" not in from_rule["event"]
+    assert "message" not in from_rule
+    assert from_rule["ticket_db_id"] == 25
+    assert from_rule["window_key"] == from_event["window_key"]
+
+
+def test_normalize_rejects_missing_identity_and_bad_timestamp():
+    bad_identity = payload()
+    bad_identity.pop("alert_id")
+    with pytest.raises(ValueError):
+        ai_xdr.normalize_event_payload(bad_identity)
+
+    bad_time = payload()
+    bad_time["timestamp"] = "not-a-date"
+    with pytest.raises(ValueError):
+        ai_xdr.normalize_event_payload(bad_time)
+
+
+def test_different_ips_do_not_share_aggregation_window():
+    now = datetime(2026, 10, 26, 1, 2, tzinfo=timezone.utc)
+    first = ai_xdr.normalize_event_payload(payload(), received_at=now)
+    second = ai_xdr.normalize_event_payload(
+        payload(alert_id="alert-2", src_ip="192.168.7.78"), received_at=now
+    )
+    same_ip = ai_xdr.normalize_event_payload(payload(alert_id="alert-3"), received_at=now)
+
+    assert first["window_key"] != second["window_key"]
+    assert first["window_key"] == same_ip["window_key"]
+
+
+def test_triage_window_is_bounded_and_invalid_setting_uses_default():
+    assert ai_xdr._triage_window_seconds(-10) == 60
+    assert ai_xdr._triage_window_seconds(3600) == 900
+    assert ai_xdr._triage_window_seconds("invalid") == 180
+
+
+def test_aggregate_events_keeps_counts_and_metadata_without_raw_content():
+    rows = [
+        {"alert_id": "a1", "rule_id": "R8", "event_type": "not_found", "src_ip": "192.168.7.77",
+         "user_name": "scanner", "severity": "info", "event_count": 3,
+         "occurred_at": "2026-10-26T01:00:00+00:00", "event_payload": '{"path":"/a","event_type":"not_found"}',
+         "incident_ticket_id": 25},
+        {"alert_id": "a2", "rule_id": "R5", "event_type": "login_failure", "src_ip": "192.168.7.77",
+         "user_name": "scanner", "severity": "medium", "event_count": 1,
+         "occurred_at": "2026-10-26T01:01:00+00:00", "event_payload": '{"event_type":"login_failure","decision":"DENY"}',
+         "incident_ticket_id": 25},
+    ]
+    result = ai_xdr.aggregate_events(rows)
+
+    assert result["event_count"] == 4
+    assert result["rule_ids"] == ["R5", "R8"]
+    assert result["ticket_db_ids"] == [25]
+    assert all("message" not in event and "prompt" not in event for event in result["events"])
+
+
+def test_ai_result_schema_rejects_malformed_range_verdict_and_action():
+    valid = '{"assessment_id":"xdr-1","threat_score":85,"confidence":0.91,"verdict":"MALICIOUS","reasoning":"Repeated hostile metadata","recommended_actions":["block_ip"]}'
+    assert ai_xdr.parse_model_result(valid, "xdr-1")["threat_score"] == 85
+
+    for value in (
+        "not json",
+        valid.replace('"threat_score":85', '"threat_score":101'),
+        valid.replace('"verdict":"MALICIOUS"', '"verdict":"EXECUTE"'),
+        valid.replace('"block_ip"', '"shell_command"'),
+        valid.replace('"assessment_id":"xdr-1"', '"assessment_id":"other"'),
+    ):
+        with pytest.raises(ValueError):
+            ai_xdr.parse_model_result(value, "xdr-1")
+
+
+def test_model_input_omits_identity_and_resource_values():
+    summary = {
+        "src_ip": "192.168.7.77", "users": ["alice"], "ticket_db_ids": [25],
+        "rule_ids": ["R8"], "event_types": ["not_found"], "event_count": 4,
+        "first_seen": "2026-10-26T01:00:00+00:00", "last_seen": "2026-10-26T01:02:00+00:00",
+        "group_key": "ip:192.168.7.77", "window_key": "a" * 64,
+        "events": [{"rule_id": "R8", "event_type": "not_found", "event": {
+            "src_ip": "192.168.7.77", "user": "alice", "path": "/confidential/path",
+            "resource_id": "secret-doc-id", "tool_name": "restricted_document_read",
+            "decision": "DENY", "severity": "high", "count": 3, "message": "raw body",
+        }}],
+    }
+
+    model_input = ai_xdr._model_input(summary, actor_secret="unit-test-correlation-key-0123456789")
+    encoded = str(model_input)
+    assert "192.168.7.77" not in encoded
+    assert "alice" not in encoded
+    assert "confidential/path" not in encoded
+    assert "secret-doc-id" not in encoded
+    assert "raw body" not in encoded
+    assert model_input["rule_ids"] == ["R8"]
+    assert model_input["events"][0]["event"]["tool_name"] == "restricted_document_read"
+    assert model_input["same_source"] is True
+    assert model_input["correlation_basis"] == "src_ip"
+    assert model_input["actor_id"] != "192.168.7.77"
+
+
+def test_model_actor_id_is_stable_pseudonymous_and_scoped():
+    summary = {
+        "src_ip": "192.168.7.77", "users": ["alice"], "ticket_db_ids": [25],
+        "rule_ids": ["R8"], "event_types": ["not_found"], "event_count": 2,
+        "first_seen": "2026-10-26T01:00:00+00:00", "last_seen": "2026-10-26T01:02:00+00:00",
+        "group_key": "ip:192.168.7.77", "window_key": "a" * 64, "events": [],
+    }
+    first = ai_xdr._model_input(summary, actor_secret="unit-test-correlation-key-0123456789")
+    same_actor = ai_xdr._model_input(summary, actor_secret="unit-test-correlation-key-0123456789")
+    rotated_key = ai_xdr._model_input(summary, actor_secret="rotated-test-correlation-key-0123456789")
+    next_window = dict(summary, window_key="b" * 64)
+    next_window_actor = ai_xdr._model_input(next_window, actor_secret="unit-test-correlation-key-0123456789")
+
+    assert first["actor_id"] == same_actor["actor_id"]
+    assert first["actor_id"] != rotated_key["actor_id"]
+    assert first["actor_id"] != next_window_actor["actor_id"]
+    assert len(first["actor_id"]) == 32
+    assert first["same_source"] is True
+    assert first["correlation_basis"] == "src_ip"
+    assert "192.168.7.77" not in str(first)
+
+
+@pytest.mark.parametrize(
+    "now, expected_phase",
+    [
+        (datetime(2026, 10, 26, 0, 30, tzinfo=timezone.utc), "day"),  # Monday 09:30 KST
+        (datetime(2026, 10, 26, 11, 30, tzinfo=timezone.utc), "night"),  # Monday 20:30 KST
+        (datetime(2026, 10, 24, 11, 30, tzinfo=timezone.utc), "weekend_approval"),
+    ],
+)
+def test_policy_classifies_kst_day_night_and_weekend(now, expected_phase):
+    result = ai_xdr.evaluate_policy(
+        {"threat_score": 90, "confidence": 0.95, "verdict": "MALICIOUS", "recommended_actions": ["block_ip"]},
+        {"rule_ids": ["R8"], "src_ip": "192.168.7.77", "last_seen": now.isoformat()},
+        {"XDR_AUTO_ENABLED": True, "XDR_RESPONSE_MODE": "live", "XDR_AUTO_MIN_SCORE": 80,
+         "XDR_AUTO_MIN_CONFIDENCE": 0.8, "XDR_MAX_EVENT_AGE_SECONDS": 300,
+         "XDR_DAY_START_HOUR": 8, "XDR_DAY_END_HOUR": 20, "XDR_WEEKEND_MODE": "approval"},
+        now=now,
+    )
+    assert result["phase"] == expected_phase
+    assert result["auto_allowed"] is (expected_phase == "night")
+
+
+def test_night_policy_exposes_dry_run_candidate_without_allowing_execution():
+    now = datetime(2026, 10, 26, 11, 30, tzinfo=timezone.utc)
+    result = ai_xdr.evaluate_policy(
+        {"threat_score": 91, "confidence": 0.95, "verdict": "MALICIOUS", "recommended_actions": ["block_ip"]},
+        {"rule_ids": ["R5", "R8"], "src_ip": "203.0.113.55", "last_seen": now.isoformat()},
+        {"XDR_AUTO_ENABLED": True, "XDR_RESPONSE_MODE": "dry-run", "XDR_AUTO_MIN_SCORE": 80,
+         "XDR_AUTO_MIN_CONFIDENCE": 0.8, "XDR_MAX_EVENT_AGE_SECONDS": 300,
+         "XDR_DAY_START_HOUR": 8, "XDR_DAY_END_HOUR": 20, "XDR_WEEKEND_MODE": "approval"},
+        now=now,
+    )
+
+    assert result["auto_candidate"] is True
+    assert result["auto_allowed"] is False
+    assert result["reason"] == "dry_run"
+
+
+@pytest.mark.parametrize(
+    "now,rule_ids,src_ip,score,expected_reason",
+    [
+        (datetime(2026, 10, 26, 0, 30, tzinfo=timezone.utc), ["R8"], "203.0.113.55", 65,
+         "daytime_requires_approval"),
+        (datetime(2026, 10, 26, 11, 30, tzinfo=timezone.utc), ["R5"], "192.168.3.10", 95,
+         "whitelisted_ip"),
+    ],
+)
+def test_daytime_low_score_and_whitelist_are_not_auto_candidates(now, rule_ids, src_ip, score, expected_reason):
+    result = ai_xdr.evaluate_policy(
+        {"threat_score": score, "confidence": 0.95, "verdict": "MALICIOUS", "recommended_actions": ["block_ip"]},
+        {"rule_ids": rule_ids, "src_ip": src_ip, "last_seen": now.isoformat()},
+        {"XDR_AUTO_ENABLED": True, "XDR_RESPONSE_MODE": "live", "XDR_AUTO_MIN_SCORE": 80,
+         "XDR_AUTO_MIN_CONFIDENCE": 0.8, "XDR_MAX_EVENT_AGE_SECONDS": 300,
+         "XDR_DAY_START_HOUR": 8, "XDR_DAY_END_HOUR": 20, "XDR_WEEKEND_MODE": "approval"},
+        now=now,
+    )
+
+    assert result["auto_candidate"] is False
+    assert result["auto_allowed"] is False
+    assert result["reason"] == expected_reason
+
+
+def test_stale_event_is_not_an_auto_candidate():
+    now = datetime(2026, 10, 26, 11, 30, tzinfo=timezone.utc)
+    result = ai_xdr.evaluate_policy(
+        {"threat_score": 95, "confidence": 0.99, "verdict": "MALICIOUS", "recommended_actions": ["block_ip"]},
+        {"rule_ids": ["R8"], "src_ip": "203.0.113.55", "last_seen": "2026-10-26T10:00:00Z"},
+        {"XDR_AUTO_ENABLED": True, "XDR_RESPONSE_MODE": "dry-run", "XDR_AUTO_MIN_SCORE": 80,
+         "XDR_AUTO_MIN_CONFIDENCE": 0.8, "XDR_MAX_EVENT_AGE_SECONDS": 300,
+         "XDR_DAY_START_HOUR": 8, "XDR_DAY_END_HOUR": 20, "XDR_WEEKEND_MODE": "approval"},
+        now=now,
+    )
+
+    assert result["auto_candidate"] is False
+    assert result["reason"] == "stale_event"
+
+
+def test_admin_xdr_page_marks_dry_run_auto_candidate(app):
+    from flask import render_template
+
+    assessment = {
+        "assessment_id": "assessment-test", "last_seen_kst": "2026-10-26 20:30:00 KST",
+        "src_ip": "203.0.113.55", "user_names": [], "rule_ids": ["R5", "R8"],
+        "event_types": ["login_failure", "not_found"], "event_count": 4, "verdict": "MALICIOUS",
+        "threat_score": 91, "confidence": 0.95, "reasoning": "metadata only", "status": "PENDING",
+        "policy_mode": "night", "policy_reason": "dry_run", "recommended_actions": ["block_ip"],
+        "incident_ticket_id": 25, "response_result": {"blocked": False, "auto_candidate": True},
+    }
+    with app.test_request_context("/admin/xdr"):
+        html = render_template("admin_xdr.html", xdr_enabled=True, unavailable=False, result=None,
+                               assessments=[assessment], csrf_token=lambda: "test-csrf")
+
+    assert "자동 차단 후보" in html
+
+
+@pytest.mark.parametrize(
+    "rule_ids,src_ip,extra,expected",
+    [
+        (["R8"], "192.168.7.77", {}, True),
+        (["R3"], "192.168.7.77", {}, False),
+        (["R8"], "192.168.3.10", {}, False),
+        (["R8"], "not-an-ip", {}, False),
+        (["R8"], "192.168.7.77", {"XDR_AUTO_MIN_CONFIDENCE": None}, False),
+        (["R8"], "192.168.7.77", {"XDR_RESPONSE_MODE": "dry-run"}, False),
+    ],
+)
+def test_policy_fails_closed_for_rule_whitelist_ip_and_unset_or_dry_run(rule_ids, src_ip, extra, expected):
+    now = datetime(2026, 10, 26, 11, 30, tzinfo=timezone.utc)
+    cfg = {"XDR_AUTO_ENABLED": True, "XDR_RESPONSE_MODE": "live", "XDR_AUTO_MIN_SCORE": 80,
+           "XDR_AUTO_MIN_CONFIDENCE": 0.8, "XDR_MAX_EVENT_AGE_SECONDS": 300,
+           "XDR_DAY_START_HOUR": 8, "XDR_DAY_END_HOUR": 20, "XDR_WEEKEND_MODE": "approval"}
+    cfg.update(extra)
+    result = ai_xdr.evaluate_policy(
+        {"threat_score": 90, "confidence": 0.95, "verdict": "MALICIOUS", "recommended_actions": ["block_ip"]},
+        {"rule_ids": rule_ids, "src_ip": src_ip, "last_seen": now.isoformat()}, cfg, now=now
+    )
+    assert result["auto_allowed"] is expected
+
+
+@pytest.mark.parametrize(
+    "config_override",
+    [
+        {"XDR_DAY_START_HOUR": 22, "XDR_DAY_END_HOUR": 8, "XDR_WEEKEND_MODE": "night_auto"},
+        {"XDR_DAY_START_HOUR": 8, "XDR_DAY_END_HOUR": 8},
+        {"XDR_AUTO_MIN_SCORE": -1},
+        {"XDR_AUTO_MIN_SCORE": 101},
+    ],
+)
+def test_invalid_auto_policy_settings_fail_closed(config_override):
+    now = datetime(2026, 10, 26, 11, 30, tzinfo=timezone.utc)
+    config = {"XDR_AUTO_ENABLED": True, "XDR_RESPONSE_MODE": "live", "XDR_AUTO_MIN_SCORE": 80,
+              "XDR_AUTO_MIN_CONFIDENCE": 0.8, "XDR_MAX_EVENT_AGE_SECONDS": 300,
+              "XDR_DAY_START_HOUR": 8, "XDR_DAY_END_HOUR": 20, "XDR_WEEKEND_MODE": "approval"}
+    config.update(config_override)
+    result = ai_xdr.evaluate_policy(
+        {"threat_score": 90, "confidence": 0.95, "verdict": "MALICIOUS", "recommended_actions": ["block_ip"]},
+        {"rule_ids": ["R8"], "src_ip": "192.168.7.77", "last_seen": now.isoformat()}, config, now=now,
+    )
+    assert result["auto_allowed"] is False
+
+
+def test_invalid_ai_output_has_review_required_fail_safe():
+    result = ai_xdr.fail_safe_result("xdr-1")
+    assert result["assessment_id"] == "xdr-1"
+    assert result["verdict"] == "REVIEW_REQUIRED"
+    assert result["threat_score"] == 0
+    assert result["confidence"] == 0
+    assert result["recommended_actions"] == []
+    assert ai_xdr._assessment_status(result, {"auto_candidate": False}) == "NO_ACTION"
+
+
+def test_model_timeout_and_malformed_response_fail_closed(monkeypatch):
+    monkeypatch.setattr(ai_xdr, "_model_response", lambda *_: (_ for _ in ()).throw(TimeoutError()))
+    assert ai_xdr.triage({}, "xdr-timeout")["verdict"] == "REVIEW_REQUIRED"
+    monkeypatch.setattr(ai_xdr, "_model_response", lambda *_: "not json")
+    assert ai_xdr.triage({}, "xdr-malformed")["recommended_actions"] == []
+
+
+@pytest.mark.parametrize("rule_id", ["R5", "R6", "R8", "R3"])
+def test_window_processor_reuses_block_ip_only_for_allowed_rules(app, monkeypatch, rule_id):
+    from app import db, security
+
+    now = datetime(2026, 10, 26, 11, 30, tzinfo=timezone.utc)
+    window_key = "a" * 64
+    rows = [{
+        "alert_id": "alert-processor", "window_key": window_key, "group_key": "ip:192.168.7.77",
+        "incident_ticket_id": 25, "rule_id": rule_id, "event_type": "test_event",
+        "src_ip": "192.168.7.77", "user_name": "scanner", "severity": "high", "event_count": 1,
+        "occurred_at": now, "event_payload": '{"event_type":"test_event","decision":"DENY"}',
+    }]
+    queries = iter(([{"window_key": window_key, "window_start": now}], rows))
+    writes = []
+    blocked = []
+    monkeypatch.setattr(db, "query_all", lambda *_args, **_kwargs: next(queries))
+    monkeypatch.setattr(db, "execute_rowcount", lambda sql, params=(): writes.append((sql, params)) or 1)
+    monkeypatch.setattr(security, "log_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(security, "block_ip", lambda *args, **kwargs: blocked.append((args, kwargs)) or True)
+    monkeypatch.setattr(ai_xdr, "triage", lambda *_args: {
+        "assessment_id": "ignored", "threat_score": 95, "confidence": 0.99,
+        "verdict": "MALICIOUS", "reasoning": "Repeated malicious activity",
+        "recommended_actions": ["block_ip"],
+    })
+    app.config.update({
+        "XDR_TRIAGE_WINDOW_SECONDS": 180, "XDR_AUTO_ENABLED": True, "XDR_RESPONSE_MODE": "live",
+        "XDR_AUTO_MIN_SCORE": 80, "XDR_AUTO_MIN_CONFIDENCE": 0.8, "XDR_MAX_EVENT_AGE_SECONDS": 300,
+        "XDR_DAY_START_HOUR": 8, "XDR_DAY_END_HOUR": 20, "XDR_WEEKEND_MODE": "approval",
+    })
+
+    with app.app_context():
+        result = ai_xdr.process_ready_windows(now=now)
+
+    assert result["processed"] == 1
+    assert bool(blocked) is (rule_id in {"R5", "R6", "R8"})
+    assert len(writes) == 3
+
+
+def test_window_processor_deduplicates_reserved_window_before_model_call(app, monkeypatch):
+    from app import db
+
+    now = datetime(2026, 10, 26, 11, 30, tzinfo=timezone.utc)
+    window_key = "b" * 64
+    rows = [{
+        "alert_id": "alert-reserved", "window_key": window_key, "group_key": "ip:192.168.7.77",
+        "incident_ticket_id": 25, "rule_id": "R8", "event_type": "not_found", "src_ip": "192.168.7.77",
+        "user_name": "scanner", "severity": "info", "event_count": 1, "occurred_at": now,
+        "event_payload": '{"event_type":"not_found"}',
+    }]
+    queries = iter(([{"window_key": window_key, "window_start": now}], rows))
+    monkeypatch.setattr(db, "query_all", lambda *_args, **_kwargs: next(queries))
+    monkeypatch.setattr(db, "execute_rowcount", lambda *_args, **_kwargs: 0)
+    monkeypatch.setattr(ai_xdr, "triage", lambda *_args: pytest.fail("reserved window must not call AI"))
+
+    with app.app_context():
+        result = ai_xdr.process_ready_windows(now=now)
+
+    assert result == {"processed": 0, "assessments": []}
+
+
+def test_assessment_approval_in_dry_run_records_decision_without_blocking(app, monkeypatch):
+    from app import db, security
+
+    now = datetime(2026, 10, 26, 1, 30, tzinfo=timezone.utc)
+    row = {
+        "assessment_id": "assessment-1", "incident_ticket_id": 25, "src_ip": "192.168.7.77",
+        "rule_ids": '["R8"]', "user_names": '["scanner"]', "event_count": 3,
+        "last_seen": now.isoformat(), "verdict": "MALICIOUS", "threat_score": 90, "confidence": 0.95,
+        "reasoning": "Repeated scan metadata", "recommended_actions": '["block_ip"]',
+        "event_summary": json.dumps({"rule_ids": ["R8"], "src_ip": "192.168.7.77", "last_seen": now.isoformat()}),
+        "status": "PENDING",
+    }
+    writes = []
+    blocks = []
+    monkeypatch.setattr(db, "query_one", lambda *_args, **_kwargs: row)
+    monkeypatch.setattr(db, "execute_rowcount", lambda sql, params=(): writes.append((sql, params)) or 1)
+    monkeypatch.setattr(security, "log_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(security, "block_ip", lambda *args, **kwargs: blocks.append((args, kwargs)) or True)
+    app.config.update({"XDR_RESPONSE_MODE": "dry-run", "XDR_MAX_EVENT_AGE_SECONDS": 300})
+
+    with app.app_context():
+        result = ai_xdr.decide_assessment("assessment-1", "APPROVED", 7, "admin", now=now)
+
+    assert result["status"] == "APPROVED"
+    assert result["response"]["reason"] == "dry_run"
+    assert blocks == []
+    assert len(writes) == 1
+    assert writes[0][1][0] == "APPROVED"
+
+
+def test_ingest_event_deduplicates_alert_id(app, monkeypatch):
+    from app import db
+
+    app.config["XDR_TRIAGE_WINDOW_SECONDS"] = 180
+    rowcounts = iter((1, 0))
+    statements = []
+    monkeypatch.setattr(db, "execute_rowcount", lambda sql, params=(): statements.append((sql, params)) or next(rowcounts))
+    with app.app_context():
+        first = ai_xdr.ingest_event(payload())
+        duplicate = ai_xdr.ingest_event(payload())
+    assert first["duplicate"] is False
+    assert duplicate["duplicate"] is True
+    assert "message" not in statements[0][1][-1]
+    assert "prompt" not in statements[0][1][-1]
+
+
+def test_internal_xdr_api_requires_token_and_opt_in(app, client, monkeypatch):
+    monkeypatch.setenv("LAB_INTERNAL_API_TOKEN", "test-only-token")
+    url = "/internal/api/v1/ai-xdr/events"
+    payload_data = payload()
+    app.config["XDR_ENABLED"] = False
+    assert client.post(url, json=payload_data, headers={"Authorization": "Bearer test-only-token"}).status_code == 503
+    app.config["XDR_ENABLED"] = True
+    monkeypatch.setattr(ai_xdr, "ingest_event", lambda data: {"accepted": True, "duplicate": False, "alert_id": data["alert_id"]})
+    response = client.post(url, json=payload_data, headers={"Authorization": "Bearer test-only-token"})
+    assert response.status_code == 202
+    assert response.json["alert_id"] == "alert-1"
+    assert client.post(url, json=payload_data).status_code == 401
+
+
+def test_internal_xdr_api_rejects_wrong_schema_without_writing(app, client, monkeypatch):
+    monkeypatch.setenv("LAB_INTERNAL_API_TOKEN", "test-only-token")
+    app.config["XDR_ENABLED"] = True
+    bad_payload = payload()
+    bad_payload["schema_version"] = "1.0"
+    response = client.post(
+        "/internal/api/v1/ai-xdr/events", json=bad_payload,
+        headers={"Authorization": "Bearer test-only-token"},
+    )
+    assert response.status_code == 422
+    assert response.json["error"] == "unsupported_schema_version"
+
+
+def test_internal_xdr_process_api_requires_token_and_opt_in(app, client, monkeypatch):
+    monkeypatch.setenv("LAB_INTERNAL_API_TOKEN", "test-only-token")
+    app.config["XDR_ENABLED"] = False
+    url = "/internal/api/v1/ai-xdr/process"
+    headers = {"Authorization": "Bearer test-only-token"}
+    assert client.post(url, headers=headers).status_code == 503
+    app.config["XDR_ENABLED"] = True
+    monkeypatch.setattr(ai_xdr, "process_ready_windows", lambda: {"processed": 0, "assessments": []})
+    assert client.post(url, headers=headers).json == {"ok": True, "processed": 0, "assessments": []}
+    assert client.post(url).status_code == 401
