@@ -33,13 +33,16 @@ def token_fingerprint(token: str) -> str:
 
 
 def _extract_token(req) -> str:
-    """Authorization 헤더(Bearer) 또는 X-API-Token 헤더에서 토큰을 추출한다."""
+    """Authorization 헤더(Bearer), X-API-Token 헤더, 또는 쿼리 파라미터(?token=)에서 토큰을 추출한다."""
     header = req.headers.get("Authorization", "")
     if header.lower().startswith("bearer "):
         return header[7:].strip()
     x_token = req.headers.get("X-API-Token", "").strip()
     if x_token:
         return x_token
+    query_token = req.args.get("token", "").strip()
+    if query_token:
+        return query_token
     return ""
 
 
@@ -135,6 +138,11 @@ def list_blocked_ips():
                 "created_at": c_at.isoformat() if hasattr(c_at, "isoformat") else str(c_at),
                 "created_by": r.get("created_by")
             })
+        if request.args.get("format") == "txt" or request.headers.get("Accept") == "text/plain":
+            from flask import Response
+            plain_text = "\n".join(str(r.get("ip_address")) for r in rows if r.get("ip_address"))
+            return Response(plain_text + ("\n" if plain_text else ""), mimetype="text/plain; charset=utf-8")
+
         return jsonify(ok=True, count=len(formatted), items=formatted)
     except Exception as exc:
         return jsonify(ok=False, error="db_error", message=str(exc)), 500

@@ -295,3 +295,13 @@ def test_automated_ip_block_api_rejects_invalid_or_unsupported_requests(app, mon
     assert response.status_code == 400
     assert response.get_json()["ok"] is False
     assert calls == []
+
+
+def test_blocked_ips_supports_format_txt_and_token_query_param(lab, monkeypatch):
+    from app import db
+    monkeypatch.setattr(db, 'query_all', lambda q, a=(): [{'id': 1, 'ip_address': '198.51.100.99', 'reason': 'test', 'blocked_until': '2099-01-01', 'created_at': '2026-01-01', 'created_by': 'admin'}])
+    client = lab
+    res = client.get('/internal/api/v1/blocked-ips?format=txt&token=' + TOKEN)
+    assert res.status_code == 200
+    assert res.headers['Content-Type'].startswith('text/plain')
+    assert '198.51.100.99' in res.get_data(as_text=True)
