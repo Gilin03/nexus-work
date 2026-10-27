@@ -441,7 +441,7 @@ def test_model_timeout_and_malformed_response_fail_closed(monkeypatch):
 
 
 @pytest.mark.parametrize("rule_id", ["R5", "R6", "R8", "R3", "R11", "R12", "R1"])
-def test_window_processor_reuses_block_ip_only_for_allowed_rules(app, monkeypatch, rule_id, caplog):
+def test_window_processor_reuses_block_ip_only_for_allowed_rules(app, monkeypatch, rule_id, events):
     from app import db, security
 
     now = datetime(2026, 10, 26, 11, 30, tzinfo=timezone.utc)
@@ -456,6 +456,7 @@ def test_window_processor_reuses_block_ip_only_for_allowed_rules(app, monkeypatc
     writes = []
     blocked = []
     monkeypatch.setattr(db, "query_all", lambda *_args, **_kwargs: next(queries))
+    monkeypatch.setattr(db, "query_one", lambda _sql, params=(), **_kwargs: {"id": params[0]})
     monkeypatch.setattr(db, "execute_rowcount", lambda sql, params=(): writes.append((sql, params)) or 1)
     monkeypatch.setattr(security, "log_event", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(security, "block_ip", lambda *args, **kwargs: blocked.append((args, kwargs)) or True)
@@ -474,8 +475,12 @@ def test_window_processor_reuses_block_ip_only_for_allowed_rules(app, monkeypatc
         result = ai_xdr.process_ready_windows(now=now)
 
     assert result["processed"] == 1
-    assert "selected_window_key=" + window_key in caplog.text
-    assert "event_rows_count=1 assessment_insert_affected_rows=1" in caplog.text
+    debug = next(event for event in events() if event["event_type"] == "xdr_process_debug")
+    assert debug["selected_window_key"] == window_key
+    assert debug["selected_window_start"] == "2026-10-26 11:30:00+00:00"
+    assert debug["event_rows_count"] == 1
+    assert debug["assessment_insert_affected_rows"] == 1
+    assert "reason" not in debug
     assert bool(blocked) is (rule_id in {"R5", "R6", "R8"})
     assert len(writes) == 3
     assessment = result["assessments"][0]
@@ -498,6 +503,51 @@ def test_window_processor_reuses_block_ip_only_for_allowed_rules(app, monkeypatc
     assert not {"src_ip", "user_names", "reasoning"} & assessment.keys()
 
 
+@pytest.mark.parametrize(
+    "event_ticket_id, existing_ticket_ids, expected_ticket_id, expected_ticket_ids",
+    [
+        (25, {25}, 25, ["NX-DB-000025"]),
+        (None, set(), None, []),
+        (42, set(), None, []),
+    ],
+)
+def test_window_processor_only_keeps_valid_ticket_foreign_keys(
+    app, monkeypatch, event_ticket_id, existing_ticket_ids, expected_ticket_id, expected_ticket_ids
+):
+    from app import db, security
+
+    now = datetime(2026, 10, 26, 11, 30, tzinfo=timezone.utc)
+    window_key = "e" * 64
+    rows = [{
+        "alert_id": "alert-ticket-fk", "window_key": window_key, "group_key": "ip:192.0.2.77",
+        "incident_ticket_id": event_ticket_id, "rule_id": "R1", "event_type": "account_locked",
+        "src_ip": "192.0.2.77", "user_name": "test-user", "severity": "medium", "event_count": 1,
+        "occurred_at": now, "event_payload": "{\"event_type\":\"account_locked\"}",
+    }]
+    queries = iter(([{"window_key": window_key, "window_start": now}], rows))
+    writes = []
+    monkeypatch.setattr(db, "query_all", lambda *_args, **_kwargs: next(queries))
+    monkeypatch.setattr(db, "query_one", lambda _sql, params=(), **_kwargs: ({"id": params[0]} if params[0] in existing_ticket_ids else None))
+    monkeypatch.setattr(db, "execute_rowcount", lambda sql, params=(): writes.append((sql, params)) or 1)
+    monkeypatch.setattr(security, "log_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(security, "block_ip", lambda *_args, **_kwargs: pytest.fail("R1 must not block"))
+    monkeypatch.setattr(ai_xdr, "triage", lambda _summary, assessment_id: {
+        "assessment_id": assessment_id, "threat_score": 70, "confidence": 0.9,
+        "verdict": "REVIEW_REQUIRED", "reasoning": "Synthetic metadata", "recommended_actions": ["review"],
+    })
+    app.config.update({"XDR_AUTO_ENABLED": False, "XDR_RESPONSE_MODE": "dry-run"})
+
+    with app.app_context():
+        result = ai_xdr.process_ready_windows(now=now)
+
+    assert result["processed"] == 1
+    assessment = result["assessments"][0]
+    assert assessment["incident_ticket_id"] == expected_ticket_id
+    assert assessment["ticket_ids"] == expected_ticket_ids
+    assert writes[0][1][3] == expected_ticket_id
+    assert json.loads(writes[0][1][11])["ticket_db_ids"] == ([expected_ticket_id] if expected_ticket_id else [])
+
+
 def test_window_processor_returns_all_ticket_correlations(app, monkeypatch):
     from app import db, security
 
@@ -515,6 +565,7 @@ def test_window_processor_returns_all_ticket_correlations(app, monkeypatch):
     ]
     queries = iter(([{"window_key": window_key, "window_start": now}], rows))
     monkeypatch.setattr(db, "query_all", lambda *_args, **_kwargs: next(queries))
+    monkeypatch.setattr(db, "query_one", lambda _sql, params=(), **_kwargs: {"id": params[0]})
     monkeypatch.setattr(db, "execute_rowcount", lambda *_args, **_kwargs: 1)
     monkeypatch.setattr(security, "log_event", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(ai_xdr, "triage", lambda _summary, assessment_id: {
@@ -532,7 +583,7 @@ def test_window_processor_returns_all_ticket_correlations(app, monkeypatch):
     assert assessment["rule_ids"] == ["R1", "R2"]
 
 
-def test_window_processor_deduplicates_reserved_window_before_model_call(app, monkeypatch, caplog):
+def test_window_processor_deduplicates_reserved_window_before_model_call(app, monkeypatch, events):
     from app import db
 
     now = datetime(2026, 10, 26, 11, 30, tzinfo=timezone.utc)
@@ -545,6 +596,7 @@ def test_window_processor_deduplicates_reserved_window_before_model_call(app, mo
     }]
     queries = iter(([{"window_key": window_key, "window_start": now}], rows))
     monkeypatch.setattr(db, "query_all", lambda *_args, **_kwargs: next(queries))
+    monkeypatch.setattr(db, "query_one", lambda _sql, params=(), **_kwargs: {"id": params[0]})
     monkeypatch.setattr(db, "execute_rowcount", lambda *_args, **_kwargs: 0)
     monkeypatch.setattr(ai_xdr, "triage", lambda *_args: pytest.fail("reserved window must not call AI"))
 
@@ -552,11 +604,14 @@ def test_window_processor_deduplicates_reserved_window_before_model_call(app, mo
         result = ai_xdr.process_ready_windows(now=now)
 
     assert result == {"processed": 0, "assessments": []}
-    assert "selected_window_key=" + window_key in caplog.text
-    assert "event_rows_count=1 assessment_insert_affected_rows=0 reason=assessment_insert_ignored" in caplog.text
+    debug = next(event for event in events() if event["event_type"] == "xdr_process_debug")
+    assert debug["selected_window_key"] == window_key
+    assert debug["event_rows_count"] == 1
+    assert debug["assessment_insert_affected_rows"] == 0
+    assert debug["reason"] == "assessment_insert_ignored"
 
 
-def test_window_processor_logs_no_ready_window(app, monkeypatch, caplog):
+def test_window_processor_logs_no_ready_window(app, monkeypatch, events):
     from app import db
 
     monkeypatch.setattr(db, "query_all", lambda *_args, **_kwargs: [])
@@ -564,10 +619,15 @@ def test_window_processor_logs_no_ready_window(app, monkeypatch, caplog):
         result = ai_xdr.process_ready_windows()
 
     assert result == {"processed": 0, "assessments": []}
-    assert "reason=no_ready_window" in caplog.text
+    debug = next(event for event in events() if event["event_type"] == "xdr_process_debug")
+    assert debug["selected_window_key"] == "none"
+    assert debug["selected_window_start"] == "none"
+    assert debug["event_rows_count"] == 0
+    assert debug["assessment_insert_affected_rows"] == "not_attempted"
+    assert debug["reason"] == "no_ready_window"
 
 
-def test_window_processor_logs_empty_window_events(app, monkeypatch, caplog):
+def test_window_processor_logs_empty_window_events(app, monkeypatch, events):
     from app import db
 
     now = datetime(2026, 10, 26, 11, 30, tzinfo=timezone.utc)
@@ -580,8 +640,12 @@ def test_window_processor_logs_empty_window_events(app, monkeypatch, caplog):
         result = ai_xdr.process_ready_windows(now=now)
 
     assert result == {"processed": 0, "assessments": []}
-    assert "selected_window_key=" + window_key in caplog.text
-    assert "event_rows_count=0 assessment_insert_affected_rows=not_attempted reason=empty_window_events" in caplog.text
+    debug = next(event for event in events() if event["event_type"] == "xdr_process_debug")
+    assert debug["selected_window_key"] == window_key
+    assert debug["selected_window_start"] == "2026-10-26 11:30:00+00:00"
+    assert debug["event_rows_count"] == 0
+    assert debug["assessment_insert_affected_rows"] == "not_attempted"
+    assert debug["reason"] == "empty_window_events"
 
 
 def test_assessment_approval_in_dry_run_records_decision_without_blocking(app, monkeypatch):
