@@ -22,6 +22,7 @@ GRAYLOG_FIELDS = {
     "decision", "reason", "request_id", "session_id", "injection_type", "source_type", "trigger_source",
     "tool_name", "resource_class", "resource_id", "trigger_resource_id", "pattern_id", "caller_service",
     "required", "resource", "field", "kind", "count", "chars", "rows", "size", "target", "action",
+    "selected_window_key", "selected_window_start", "event_rows_count", "assessment_insert_affected_rows",
     "approval_id", "requester_id", "expense_id", "steps", "board", "post_id", "attachment_id", "failed_attempts",
     "conversation_id", "members", "action_level", "lock_request_id", "trigger_event_type", "window_seconds",
     "has_token", "token_fp", "user_agent",
@@ -249,6 +250,26 @@ def init_logging(log_dir, graylog_host=None, graylog_port=12201):
     if graylog_host:
         _logger.addHandler(GelfUdpHandler(graylog_host, graylog_port))
     _logger.setLevel(logging.INFO)
+
+
+def log_xdr_process_debug(*, selected_window_key, selected_window_start, event_rows_count,
+                          assessment_insert_affected_rows, reason=None):
+    """Write metadata-only XDR processing diagnostics through the security log handlers."""
+    if hasattr(selected_window_start, "isoformat"):
+        selected_window_start = selected_window_start.isoformat(sep=" ")
+    record = {
+        "ts": datetime.now(timezone.utc).isoformat(timespec="microseconds"),
+        "event_type": "xdr_process_debug",
+        "source_component": "ai_xdr",
+        "severity": "info",
+        "selected_window_key": str(selected_window_key)[:200],
+        "selected_window_start": str(selected_window_start)[:80],
+        "event_rows_count": int(event_rows_count),
+        "assessment_insert_affected_rows": assessment_insert_affected_rows,
+    }
+    if reason is not None:
+        record["reason"] = str(reason)[:80]
+    _logger.info(json.dumps(record, ensure_ascii=False, separators=(",", ":")))
 
 
 def log_event(event_type: str, decision: str = "INFO", reason: str = "", **extra):
