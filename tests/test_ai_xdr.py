@@ -182,6 +182,128 @@ def test_policy_classifies_kst_day_night_and_weekend(now, expected_phase):
     assert result["auto_allowed"] is (expected_phase == "night")
 
 
+@pytest.mark.parametrize(
+    "reason,status,expected",
+    [
+        ("daytime_requires_approval", "PENDING", "DAYTIME_APPROVAL"),
+        ("weekend_requires_approval", "PENDING", "WEEKEND_APPROVAL"),
+        ("dry_run", "PENDING", "DRY_RUN"),
+        ("auto_disabled", "PENDING", "AUTO_DISABLED"),
+        ("score_below_threshold", "PENDING", "LOW_SCORE"),
+        ("confidence_below_threshold", "PENDING", "LOW_CONFIDENCE"),
+        ("confidence_threshold_unset", "PENDING", "CONFIDENCE_THRESHOLD_UNSET"),
+        ("rule_not_allowed", "PENDING", "RULE_NOT_ALLOWED"),
+        ("verdict_not_malicious", "PENDING", "VERDICT_NOT_MALICIOUS"),
+        ("verdict_not_malicious", "NO_ACTION", "NO_ACTION"),
+        ("policy_passed", "AUTO_EXECUTED", "POLICY_PASSED"),
+    ],
+)
+def test_policy_reason_response_codes_preserve_gate_reason(reason, status, expected):
+    fields = ai_xdr._policy_reason_fields({"reason": reason}, status)
+    assert fields == {"policy_reason": expected, "policy_reason_detail": reason}
+
+
+@pytest.mark.parametrize(
+    "now,expected_reason,expected_code",
+    [
+        (datetime(2026, 10, 26, 0, 30, tzinfo=timezone.utc),
+         "daytime_requires_approval", "DAYTIME_APPROVAL"),
+        (datetime(2026, 10, 24, 11, 30, tzinfo=timezone.utc),
+         "weekend_requires_approval", "WEEKEND_APPROVAL"),
+    ],
+)
+def test_r1_approval_policy_is_separate_from_auto_response(now, expected_reason, expected_code):
+    assessment = {"threat_score": 95, "confidence": 0.99, "verdict": "MALICIOUS", "recommended_actions": ["review"]}
+    policy = ai_xdr.evaluate_policy(
+        assessment,
+        {"rule_ids": ["R1"], "src_ip": "192.0.2.80", "last_seen": now.isoformat()},
+        {"XDR_AUTO_ENABLED": False, "XDR_RESPONSE_MODE": "dry-run", "XDR_AUTO_MIN_SCORE": 80,
+         "XDR_AUTO_MIN_CONFIDENCE": 0.8, "XDR_MAX_EVENT_AGE_SECONDS": 300,
+         "XDR_DAY_START_HOUR": 8, "XDR_DAY_END_HOUR": 20, "XDR_WEEKEND_MODE": "approval"},
+        now=now,
+    )
+
+    assert policy["auto_allowed"] is False
+    assert policy["approval_allowed"] is True
+    assert policy["reason"] == expected_reason
+    assert ai_xdr._assessment_status(assessment, policy) == "PENDING"
+    assert ai_xdr._policy_reason_fields(policy, "PENDING")["policy_reason"] == expected_code
+
+
+@pytest.mark.parametrize(
+    "score,confidence,expected_reason",
+    [(79, 0.99, "score_below_threshold"), (95, 0.79, "confidence_below_threshold")],
+)
+def test_r1_approval_requires_score_and_confidence(score, confidence, expected_reason):
+    now = datetime(2026, 10, 26, 0, 30, tzinfo=timezone.utc)
+    policy = ai_xdr.evaluate_policy(
+        {"threat_score": score, "confidence": confidence, "verdict": "MALICIOUS", "recommended_actions": ["review"]},
+        {"rule_ids": ["R1"], "src_ip": "192.0.2.80", "last_seen": now.isoformat()},
+        {"XDR_AUTO_ENABLED": True, "XDR_RESPONSE_MODE": "live", "XDR_AUTO_MIN_SCORE": 80,
+         "XDR_AUTO_MIN_CONFIDENCE": 0.8, "XDR_MAX_EVENT_AGE_SECONDS": 300,
+         "XDR_DAY_START_HOUR": 8, "XDR_DAY_END_HOUR": 20, "XDR_WEEKEND_MODE": "approval"},
+        now=now,
+    )
+
+    assert policy["auto_allowed"] is False
+    assert policy["approval_allowed"] is False
+    assert policy["reason"] == expected_reason
+
+
+@pytest.mark.parametrize("confidence,expected", [(0.79, False), (0.80, True), (0.81, True)])
+@pytest.mark.parametrize("rule_id", ["R5", "R6", "R8"])
+def test_confidence_threshold_boundary_for_auto_rule_candidates(rule_id, confidence, expected):
+    now = datetime(2026, 10, 26, 13, 0, tzinfo=timezone.utc)  # 22:00 KST
+    result = ai_xdr.evaluate_policy(
+        {"threat_score": 90, "confidence": confidence, "verdict": "MALICIOUS",
+         "recommended_actions": ["block_ip"]},
+        {"rule_ids": [rule_id], "src_ip": "203.0.113.55", "last_seen": now.isoformat()},
+        {"XDR_AUTO_ENABLED": True, "XDR_RESPONSE_MODE": "live", "XDR_AUTO_MIN_SCORE": 80,
+         "XDR_AUTO_MIN_CONFIDENCE": 0.80, "XDR_MAX_EVENT_AGE_SECONDS": 300,
+         "XDR_DAY_START_HOUR": 8, "XDR_DAY_END_HOUR": 20, "XDR_WEEKEND_MODE": "approval"},
+        now=now,
+    )
+
+    assert result["auto_candidate"] is expected
+    assert result["auto_allowed"] is expected
+
+
+@pytest.mark.parametrize("confidence,expected_approval", [(0.79, False), (0.80, True), (0.81, True)])
+def test_r1_confidence_gate_allows_approval_only_never_auto_lock(confidence, expected_approval):
+    now = datetime(2026, 10, 26, 0, 30, tzinfo=timezone.utc)  # 09:30 KST
+    result = ai_xdr.evaluate_policy(
+        {"threat_score": 95, "confidence": confidence, "verdict": "MALICIOUS",
+         "recommended_actions": ["review"]},
+        {"rule_ids": ["R1"], "src_ip": "192.0.2.80", "last_seen": now.isoformat()},
+        {"XDR_AUTO_ENABLED": True, "XDR_RESPONSE_MODE": "live", "XDR_AUTO_MIN_SCORE": 80,
+         "XDR_AUTO_MIN_CONFIDENCE": 0.80, "XDR_MAX_EVENT_AGE_SECONDS": 300,
+         "XDR_DAY_START_HOUR": 8, "XDR_DAY_END_HOUR": 20, "XDR_WEEKEND_MODE": "approval"},
+        now=now,
+    )
+
+    assert result["auto_allowed"] is False
+    assert result["approval_allowed"] is expected_approval
+    assert result["reason"] == ("daytime_requires_approval" if expected_approval else "confidence_below_threshold")
+
+
+@pytest.mark.parametrize("rule_id", ["R2", "R3", "R4", "R7", "R9", "R10", "R11", "R12"])
+def test_confidence_threshold_does_not_expand_rule_allowlist(rule_id):
+    now = datetime(2026, 10, 26, 13, 0, tzinfo=timezone.utc)
+    result = ai_xdr.evaluate_policy(
+        {"threat_score": 99, "confidence": 0.99, "verdict": "MALICIOUS",
+         "recommended_actions": ["block_ip"]},
+        {"rule_ids": [rule_id], "src_ip": "203.0.113.55", "last_seen": now.isoformat()},
+        {"XDR_AUTO_ENABLED": True, "XDR_RESPONSE_MODE": "live", "XDR_AUTO_MIN_SCORE": 80,
+         "XDR_AUTO_MIN_CONFIDENCE": 0.80, "XDR_MAX_EVENT_AGE_SECONDS": 300,
+         "XDR_DAY_START_HOUR": 8, "XDR_DAY_END_HOUR": 20, "XDR_WEEKEND_MODE": "approval"},
+        now=now,
+    )
+
+    assert result["auto_allowed"] is False
+    assert result["approval_allowed"] is False
+    assert result["reason"] == "rule_not_allowed"
+
+
 def test_night_policy_exposes_dry_run_candidate_without_allowing_execution():
     now = datetime(2026, 10, 26, 11, 30, tzinfo=timezone.utc)
     result = ai_xdr.evaluate_policy(
@@ -318,7 +440,7 @@ def test_model_timeout_and_malformed_response_fail_closed(monkeypatch):
     assert ai_xdr.triage({}, "xdr-malformed")["recommended_actions"] == []
 
 
-@pytest.mark.parametrize("rule_id", ["R5", "R6", "R8", "R3"])
+@pytest.mark.parametrize("rule_id", ["R5", "R6", "R8", "R3", "R11", "R12", "R1"])
 def test_window_processor_reuses_block_ip_only_for_allowed_rules(app, monkeypatch, rule_id):
     from app import db, security
 
@@ -340,7 +462,7 @@ def test_window_processor_reuses_block_ip_only_for_allowed_rules(app, monkeypatc
     monkeypatch.setattr(ai_xdr, "triage", lambda *_args: {
         "assessment_id": "ignored", "threat_score": 95, "confidence": 0.99,
         "verdict": "MALICIOUS", "reasoning": "Repeated malicious activity",
-        "recommended_actions": ["block_ip"],
+        "recommended_actions": ["review"] if rule_id == "R1" else ["block_ip"],
     })
     app.config.update({
         "XDR_TRIAGE_WINDOW_SECONDS": 180, "XDR_AUTO_ENABLED": True, "XDR_RESPONSE_MODE": "live",
@@ -354,6 +476,58 @@ def test_window_processor_reuses_block_ip_only_for_allowed_rules(app, monkeypatc
     assert result["processed"] == 1
     assert bool(blocked) is (rule_id in {"R5", "R6", "R8"})
     assert len(writes) == 3
+    assessment = result["assessments"][0]
+    assert assessment["incident_ticket_id"] == 25
+    assert assessment["ticket_ids"] == ["NX-DB-000025"]
+    assert assessment["rule_ids"] == [rule_id]
+    assert assessment["threat_score"] == 95
+    assert assessment["confidence"] == 0.99
+    expected_action = ["review"] if rule_id == "R1" else ["block_ip"]
+    assert assessment["recommended_actions"] == expected_action
+    assert assessment["auto_allowed"] is (rule_id in {"R5", "R6", "R8"})
+    assert assessment["approval_allowed"] is (rule_id == "R1")
+    if rule_id == "R1":
+        assert assessment["status"] == "PENDING"
+    expected_reason = "R1_APPROVAL_REQUIRED" if rule_id == "R1" else (
+        "RULE_NOT_ALLOWED" if rule_id in {"R3", "R11", "R12"} else "POLICY_PASSED"
+    )
+    assert assessment["policy_reason"] == expected_reason
+    assert assessment["policy_reason_detail"] == expected_reason.lower()
+    assert not {"src_ip", "user_names", "reasoning"} & assessment.keys()
+
+
+def test_window_processor_returns_all_ticket_correlations(app, monkeypatch):
+    from app import db, security
+
+    now = datetime(2026, 10, 26, 11, 30, tzinfo=timezone.utc)
+    window_key = "c" * 64
+    rows = [
+        {"alert_id": "alert-ticket-25", "window_key": window_key, "group_key": "ip:192.0.2.77",
+         "incident_ticket_id": 25, "rule_id": "R1", "event_type": "account_locked",
+         "src_ip": "192.0.2.77", "user_name": "test-user", "severity": "medium", "event_count": 1,
+         "occurred_at": now, "event_payload": "{\"event_type\":\"account_locked\"}"},
+        {"alert_id": "alert-ticket-26", "window_key": window_key, "group_key": "ip:192.0.2.77",
+         "incident_ticket_id": 26, "rule_id": "R2", "event_type": "prompt_injection_detected",
+         "src_ip": "192.0.2.77", "user_name": "test-user", "severity": "high", "event_count": 1,
+         "occurred_at": now, "event_payload": "{\"event_type\":\"prompt_injection_detected\"}"},
+    ]
+    queries = iter(([{"window_key": window_key, "window_start": now}], rows))
+    monkeypatch.setattr(db, "query_all", lambda *_args, **_kwargs: next(queries))
+    monkeypatch.setattr(db, "execute_rowcount", lambda *_args, **_kwargs: 1)
+    monkeypatch.setattr(security, "log_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(ai_xdr, "triage", lambda _summary, assessment_id: {
+        "assessment_id": assessment_id, "threat_score": 72, "confidence": 0.88,
+        "verdict": "SUSPICIOUS", "reasoning": "Synthetic test", "recommended_actions": ["review"],
+    })
+    app.config.update({"XDR_AUTO_ENABLED": False, "XDR_RESPONSE_MODE": "dry-run"})
+
+    with app.app_context():
+        result = ai_xdr.process_ready_windows(now=now)
+
+    assessment = result["assessments"][0]
+    assert assessment["incident_ticket_id"] is None
+    assert assessment["ticket_ids"] == ["NX-DB-000025", "NX-DB-000026"]
+    assert assessment["rule_ids"] == ["R1", "R2"]
 
 
 def test_window_processor_deduplicates_reserved_window_before_model_call(app, monkeypatch):
@@ -458,6 +632,13 @@ def test_internal_xdr_process_api_requires_token_and_opt_in(app, client, monkeyp
     headers = {"Authorization": "Bearer test-only-token"}
     assert client.post(url, headers=headers).status_code == 503
     app.config["XDR_ENABLED"] = True
-    monkeypatch.setattr(ai_xdr, "process_ready_windows", lambda: {"processed": 0, "assessments": []})
-    assert client.post(url, headers=headers).json == {"ok": True, "processed": 0, "assessments": []}
+    assessment = {
+        "assessment_id": "xdr-test", "status": "PENDING", "verdict": "SUSPICIOUS",
+        "threat_score": 72, "confidence": 0.88, "recommended_actions": ["review"],
+        "rule_ids": ["R1"], "incident_ticket_id": 25, "ticket_ids": ["NX-DB-000025"],
+        "policy_reason": "DAYTIME_APPROVAL", "policy_reason_detail": "daytime_requires_approval",
+        "auto_allowed": False, "approval_allowed": True,
+    }
+    monkeypatch.setattr(ai_xdr, "process_ready_windows", lambda: {"processed": 1, "assessments": [assessment]})
+    assert client.post(url, headers=headers).json == {"ok": True, "processed": 1, "assessments": [assessment]}
     assert client.post(url).status_code == 401
