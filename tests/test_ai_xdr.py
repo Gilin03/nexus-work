@@ -441,7 +441,7 @@ def test_model_timeout_and_malformed_response_fail_closed(monkeypatch):
 
 
 @pytest.mark.parametrize("rule_id", ["R5", "R6", "R8", "R3", "R11", "R12", "R1"])
-def test_window_processor_reuses_block_ip_only_for_allowed_rules(app, monkeypatch, rule_id):
+def test_window_processor_reuses_block_ip_only_for_allowed_rules(app, monkeypatch, rule_id, caplog):
     from app import db, security
 
     now = datetime(2026, 10, 26, 11, 30, tzinfo=timezone.utc)
@@ -474,6 +474,8 @@ def test_window_processor_reuses_block_ip_only_for_allowed_rules(app, monkeypatc
         result = ai_xdr.process_ready_windows(now=now)
 
     assert result["processed"] == 1
+    assert "selected_window_key=" + window_key in caplog.text
+    assert "event_rows_count=1 assessment_insert_affected_rows=1" in caplog.text
     assert bool(blocked) is (rule_id in {"R5", "R6", "R8"})
     assert len(writes) == 3
     assessment = result["assessments"][0]
@@ -530,7 +532,7 @@ def test_window_processor_returns_all_ticket_correlations(app, monkeypatch):
     assert assessment["rule_ids"] == ["R1", "R2"]
 
 
-def test_window_processor_deduplicates_reserved_window_before_model_call(app, monkeypatch):
+def test_window_processor_deduplicates_reserved_window_before_model_call(app, monkeypatch, caplog):
     from app import db
 
     now = datetime(2026, 10, 26, 11, 30, tzinfo=timezone.utc)
@@ -550,6 +552,36 @@ def test_window_processor_deduplicates_reserved_window_before_model_call(app, mo
         result = ai_xdr.process_ready_windows(now=now)
 
     assert result == {"processed": 0, "assessments": []}
+    assert "selected_window_key=" + window_key in caplog.text
+    assert "event_rows_count=1 assessment_insert_affected_rows=0 reason=assessment_insert_ignored" in caplog.text
+
+
+def test_window_processor_logs_no_ready_window(app, monkeypatch, caplog):
+    from app import db
+
+    monkeypatch.setattr(db, "query_all", lambda *_args, **_kwargs: [])
+    with app.app_context():
+        result = ai_xdr.process_ready_windows()
+
+    assert result == {"processed": 0, "assessments": []}
+    assert "reason=no_ready_window" in caplog.text
+
+
+def test_window_processor_logs_empty_window_events(app, monkeypatch, caplog):
+    from app import db
+
+    now = datetime(2026, 10, 26, 11, 30, tzinfo=timezone.utc)
+    window_key = "d" * 64
+    queries = iter(([{"window_key": window_key, "window_start": now}], []))
+    monkeypatch.setattr(db, "query_all", lambda *_args, **_kwargs: next(queries))
+    monkeypatch.setattr(db, "execute_rowcount", lambda *_args, **_kwargs: pytest.fail("empty window must not be inserted"))
+
+    with app.app_context():
+        result = ai_xdr.process_ready_windows(now=now)
+
+    assert result == {"processed": 0, "assessments": []}
+    assert "selected_window_key=" + window_key in caplog.text
+    assert "event_rows_count=0 assessment_insert_affected_rows=not_attempted reason=empty_window_events" in caplog.text
 
 
 def test_assessment_approval_in_dry_run_records_decision_without_blocking(app, monkeypatch):
