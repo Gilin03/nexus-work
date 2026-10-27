@@ -518,6 +518,11 @@ def process_ready_windows(limit=1, now=None):
         (seconds, max(1, min(int(limit), 5))),
     )
     completed = []
+    if not windows:
+        current_app.logger.warning(
+            "xdr_process_debug reason=no_ready_window selected_window_key=none selected_window_start=none "
+            "event_rows_count=0 assessment_insert_affected_rows=not_attempted"
+        )
     for window in windows:
         window_key = str(window["window_key"])
         rows = db.query_all(
@@ -527,6 +532,11 @@ def process_ready_windows(limit=1, now=None):
             (window_key,),
         )
         if not rows:
+            current_app.logger.warning(
+                "xdr_process_debug selected_window_key=%s selected_window_start=%s event_rows_count=0 "
+                "assessment_insert_affected_rows=not_attempted reason=empty_window_events",
+                window_key, window.get("window_start"),
+            )
             continue
         summary = _summary_for_rows(rows)
         ticket_ids = summary["ticket_db_ids"]
@@ -542,8 +552,19 @@ def process_ready_windows(limit=1, now=None):
              json.dumps(summary["event_types"]), summary["event_count"], _parse_datetime(summary["first_seen"]),
              _parse_datetime(summary["last_seen"]), json.dumps(summary, ensure_ascii=False, separators=(",", ":")), "[]"),
         )
+        insert_log = (
+            "xdr_process_debug selected_window_key=%s selected_window_start=%s event_rows_count=%s "
+            "assessment_insert_affected_rows=%s"
+        )
         if not inserted:
+            current_app.logger.warning(
+                insert_log + " reason=assessment_insert_ignored",
+                window_key, window.get("window_start"), len(rows), inserted,
+            )
             continue
+        current_app.logger.warning(
+            insert_log, window_key, window.get("window_start"), len(rows), inserted,
+        )
 
         ai_result = triage(summary, assessment_id)
         config = current_app.config
