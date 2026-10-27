@@ -416,48 +416,91 @@ def _block_candidate_error(assessment, summary, config, now):
     return ""
 
 
+def _policy_threshold_error(assessment, config):
+    threshold = config.get("XDR_AUTO_MIN_CONFIDENCE")
+    if threshold is None or threshold == "":
+        return "confidence_threshold_unset"
+    try:
+        threshold = float(threshold)
+        min_score = int(config.get("XDR_AUTO_MIN_SCORE", 80))
+    except (TypeError, ValueError):
+        return "invalid_policy_threshold"
+    if not math.isfinite(threshold) or not 0 <= threshold <= 1 or not 0 <= min_score <= 100:
+        return "invalid_policy_threshold"
+    if int(assessment.get("threat_score", -1)) < min_score:
+        return "score_below_threshold"
+    if float(assessment.get("confidence", -1)) < threshold:
+        return "confidence_below_threshold"
+    return ""
+
+
+def _r1_approval_error(assessment, config):
+    if assessment.get("verdict") != "MALICIOUS":
+        return "verdict_not_malicious"
+    if assessment.get("recommended_actions") != ["review"]:
+        return "action_not_recommended"
+    return _policy_threshold_error(assessment, config)
+
+
 def evaluate_policy(assessment, summary, config, now=None):
     now = _parse_datetime(now or datetime.now(UTC))
     phase = classify_phase(now, config)
-    reason = "policy_config_invalid" if phase == "policy_invalid" else _block_candidate_error(assessment, summary, config, now)
+    if phase == "policy_invalid":
+        return {"phase": phase, "auto_candidate": False, "auto_allowed": False,
+                "approval_allowed": False, "reason": "policy_config_invalid"}
+
+    if summary.get("rule_ids") == ["R1"]:
+        reason = _r1_approval_error(assessment, config)
+        if reason:
+            return {"phase": phase, "auto_candidate": False, "auto_allowed": False,
+                    "approval_allowed": False, "reason": reason}
+        approval_reason = {
+            "day": "daytime_requires_approval",
+            "weekend_approval": "weekend_requires_approval",
+            "night": "r1_approval_required",
+        }[phase]
+        return {"phase": phase, "auto_candidate": False, "auto_allowed": False,
+                "approval_allowed": True, "reason": approval_reason}
+
+    reason = _block_candidate_error(assessment, summary, config, now)
     if not reason and assessment.get("verdict") != "MALICIOUS":
         reason = "verdict_not_malicious"
     if not reason and phase == "day":
         reason = "daytime_requires_approval"
     if not reason and phase == "weekend_approval":
         reason = "weekend_requires_approval"
-    threshold = config.get("XDR_AUTO_MIN_CONFIDENCE")
-    if not reason and (threshold is None or threshold == ""):
-        reason = "confidence_threshold_unset"
     if not reason:
-        try:
-            threshold = float(threshold)
-            min_score = int(config.get("XDR_AUTO_MIN_SCORE", 80))
-        except (TypeError, ValueError):
-            reason = "invalid_policy_threshold"
-        else:
-            if not math.isfinite(threshold) or not 0 <= threshold <= 1 or not 0 <= min_score <= 100:
-                reason = "invalid_policy_threshold"
-            elif int(assessment.get("threat_score", -1)) < min_score:
-                reason = "score_below_threshold"
-            elif float(assessment.get("confidence", -1)) < threshold:
-                reason = "confidence_below_threshold"
+        reason = _policy_threshold_error(assessment, config)
     auto_candidate = not reason
     if not reason and not bool(config.get("XDR_AUTO_ENABLED", False)):
         reason = "auto_disabled"
     if not reason and str(config.get("XDR_RESPONSE_MODE", "dry-run")).lower() != "live":
         reason = "dry_run"
     return {"phase": phase, "auto_candidate": auto_candidate, "auto_allowed": not reason,
-            "reason": reason or "policy_passed"}
+            "approval_allowed": False, "reason": reason or "policy_passed"}
 
 
 def _assessment_status(assessment, policy, action_result=None):
     if action_result is not None:
         return "AUTO_EXECUTED" if action_result.get("blocked") else "PENDING"
-    if assessment.get("verdict") in {"BENIGN", "REVIEW_REQUIRED"} and \
-            "block_ip" not in assessment.get("recommended_actions", []):
+    if assessment.get("verdict") in {"BENIGN", "REVIEW_REQUIRED"} and             "block_ip" not in assessment.get("recommended_actions", []):
         return "NO_ACTION"
     return "PENDING"
+
+
+def _policy_reason_fields(policy, status):
+    reason = str(policy.get("reason") or "policy_config_invalid")
+    reason_codes = {
+        "daytime_requires_approval": "DAYTIME_APPROVAL",
+        "weekend_requires_approval": "WEEKEND_APPROVAL",
+        "dry_run": "DRY_RUN",
+        "auto_disabled": "AUTO_DISABLED",
+        "score_below_threshold": "LOW_SCORE",
+        "confidence_below_threshold": "LOW_CONFIDENCE",
+        "r1_approval_required": "R1_APPROVAL_REQUIRED",
+    }
+    code = "NO_ACTION" if status == "NO_ACTION" else reason_codes.get(reason, reason.upper())
+    return {"policy_reason": code, "policy_reason_detail": reason}
 
 
 def _summary_for_rows(rows):
@@ -534,7 +577,20 @@ def process_ready_windows(limit=1, now=None):
             event_count=summary["event_count"], threat_score=ai_result["threat_score"],
             confidence=ai_result["confidence"], verdict=ai_result["verdict"], status=status,
         )
-        completed.append({"assessment_id": assessment_id, "status": status, "verdict": ai_result["verdict"]})
+        completed.append({
+            "assessment_id": assessment_id,
+            "status": status,
+            **_policy_reason_fields(policy, status),
+            "auto_allowed": policy["auto_allowed"],
+            "approval_allowed": policy["approval_allowed"],
+            "verdict": ai_result["verdict"],
+            "threat_score": ai_result["threat_score"],
+            "confidence": ai_result["confidence"],
+            "recommended_actions": ai_result["recommended_actions"],
+            "rule_ids": summary["rule_ids"],
+            "incident_ticket_id": ticket_id,
+            "ticket_ids": [f"NX-DB-{db_id:06d}" for db_id in ticket_ids],
+        })
     return {"processed": len(completed), "assessments": completed}
 
 
