@@ -2,17 +2,18 @@ import pytest
 from app import security
 
 
-def test_ip_blocking_lifecycle(app, client):
+def test_ip_blocking_lifecycle(test_db_app):
+    client = test_db_app.test_client()
     test_ip = "192.168.100.99"
 
     # 1. 초기 상태: 차단되지 않음
-    with app.app_context():
+    with test_db_app.app_context():
         security.unblock_ip(test_ip)
         blocked, _ = security.is_ip_blocked(test_ip)
         assert blocked is False
 
     # 2. IP 차단 등록 (30분)
-    with app.app_context():
+    with test_db_app.app_context():
         assert security.block_ip(test_ip, reason="test_attack", minutes=30, created_by="tester") is True
         blocked, reason = security.is_ip_blocked(test_ip)
         assert blocked is True
@@ -39,7 +40,7 @@ def test_ip_blocking_lifecycle(app, client):
     assert res_healthz.status_code == 200
 
     # 7. 차단 해제 후 정상 접근 확인
-    with app.app_context():
+    with test_db_app.app_context():
         assert security.unblock_ip(test_ip) is True
         blocked, _ = security.is_ip_blocked(test_ip)
         assert blocked is False
@@ -77,3 +78,7 @@ def test_admin_blocked_ips_views(aapp, root):
     with aapp.app_context():
         blocked, _ = security.is_ip_blocked("192.168.99.77")
         assert blocked is False
+
+    res_protected = post(c, "/admin/blocked-ips", ip_address="192.168.3.14", reason="test", minutes="30")
+    assert res_protected.status_code == 303
+    assert "error=protected_ip" in res_protected.headers["Location"]

@@ -26,7 +26,7 @@ AUTO_BLOCK_REASONS = {
     "R6": "post_lock_retry",
     "R8": "web_path_scan",
 }
-AUTO_BLOCK_WHITELIST = {"127.0.0.1", "192.168.3.10", "192.168.3.11", "192.168.3.14", "192.168.3.15", "::1"}
+AUTO_BLOCK_WHITELIST = security.PROTECTED_BLOCK_IPS
 
 
 def token_fingerprint(token: str) -> str:
@@ -128,6 +128,7 @@ def list_blocked_ips():
             "SELECT id, ip_address, reason, blocked_until, created_at, created_by "
             "FROM blocked_ips WHERE blocked_until > NOW() ORDER BY blocked_until DESC LIMIT 200"
         )
+        rows = [r for r in rows if not security.is_protected_block_ip(r.get("ip_address"))]
         formatted = []
         for r in rows:
             b_until = r.get("blocked_until")
@@ -171,6 +172,9 @@ def create_blocked_ip():
         return jsonify(ok=False, error="invalid_ip", message=result_or_err), 400
 
     ip = result_or_err
+    if security.is_protected_block_ip(ip):
+        return jsonify(ok=False, error="ip_whitelisted", message="관리·서버 주소는 차단할 수 없습니다."), 403
+
     reason = str(payload.get("reason") or request.form.get("reason", "n8n_soar_block")).strip()[:100]
     raw_minutes = payload.get("minutes") if "minutes" in payload else request.form.get("minutes", 30)
     try:
@@ -182,7 +186,6 @@ def create_blocked_ip():
 
     created_by = str(payload.get("created_by") or request.form.get("created_by", "n8n_soar")).strip()[:50]
 
-    from . import security
     success = security.block_ip(ip, reason=reason, minutes=minutes, created_by=created_by)
     if not success:
         return jsonify(ok=False, error="block_failed", message="IP 차단 처리에 실패했습니다."), 500
@@ -289,7 +292,7 @@ def automated_ip_block():
         return jsonify(ok=False, error="invalid_ip"), 400
     if parsed_ip.is_unspecified or parsed_ip.is_multicast:
         return jsonify(ok=False, error="invalid_ip"), 400
-    if ip in AUTO_BLOCK_WHITELIST or parsed_ip.is_loopback:
+    if security.is_protected_block_ip(ip):
         security.log_event("ip_block_automation", "DENY", "ip_whitelisted", action=rule_id, resource=ip)
         return jsonify(ok=False, error="ip_whitelisted"), 403
 

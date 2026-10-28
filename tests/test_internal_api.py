@@ -10,10 +10,10 @@ FLAG = "FLAG{zz-test-flag}"
 
 
 @pytest.fixture()
-def lab(app, monkeypatch):
+def lab(test_db_app, monkeypatch):
     monkeypatch.setenv("LAB_INTERNAL_API_TOKEN", TOKEN)
     monkeypatch.setenv("LAB_INTERNAL_API_FLAG", FLAG)
-    return app.test_client()
+    return test_db_app.test_client()
 
 
 def call(c, token=None, header=None):
@@ -170,12 +170,12 @@ def test_xdr_approval_endpoint_rejects_non_r1_and_auto_enabled(app, monkeypatch)
     assert denied_auto.status_code == 409
     assert denied_auto.get_json()["error"] == "dry_run_only"
     assert calls == []
-def test_blocked_ips_crud_lifecycle(lab, app, events):
+def test_blocked_ips_crud_lifecycle(lab, test_db_app, events):
     from app import security
     headers = {"Authorization": f"Bearer {TOKEN}"}
     target_ip = "198.51.100.42"
 
-    with app.app_context():
+    with test_db_app.app_context():
         security.unblock_ip(target_ip)
 
     # 1. IP 차단 등록 (POST /blocked-ips)
@@ -192,7 +192,7 @@ def test_blocked_ips_crud_lifecycle(lab, app, events):
     assert data["reason"] == "soar_auto_containment"
 
     # security 모듈 및 DB 확인
-    with app.app_context():
+    with test_db_app.app_context():
         blocked, reason = security.is_ip_blocked(target_ip)
         assert blocked is True
         assert reason == "soar_auto_containment"
@@ -213,20 +213,20 @@ def test_blocked_ips_crud_lifecycle(lab, app, events):
     assert res_unblock.status_code == 200
     assert res_unblock.get_json()["ok"] is True
 
-    with app.app_context():
+    with test_db_app.app_context():
         blocked, _ = security.is_ip_blocked(target_ip)
         assert blocked is False
 
     # 4. 재차단 후 DELETE 메소드로 해제 테스트
     lab.post("/internal/api/v1/blocked-ips", json={"ip": target_ip}, headers=headers)
-    with app.app_context():
+    with test_db_app.app_context():
         assert security.is_ip_blocked(target_ip)[0] is True
 
     res_del = lab.delete(f"/internal/api/v1/blocked-ips/{target_ip}", headers=headers)
     assert res_del.status_code == 200
     assert res_del.get_json()["ok"] is True
 
-    with app.app_context():
+    with test_db_app.app_context():
         assert security.is_ip_blocked(target_ip)[0] is False
 
 
@@ -251,10 +251,24 @@ def test_blocked_ips_validation(lab):
     assert res_empty.status_code == 400
 
 
-def test_n8n_api_token_support(app, monkeypatch):
+@pytest.mark.parametrize("ip", [
+    "192.168.3.10", "192.168.3.11", "192.168.3.14", "192.168.3.15",
+    "::ffff:192.168.3.10",
+])
+def test_blocked_ips_api_protects_management_and_server_ips(lab, ip):
+    response = lab.post(
+        "/internal/api/v1/blocked-ips", json={"ip": ip},
+        headers={"Authorization": f"Bearer {TOKEN}"},
+    )
+
+    assert response.status_code == 403
+    assert response.get_json()["error"] == "ip_whitelisted"
+
+
+def test_n8n_api_token_support(test_db_app, monkeypatch):
     n8n_token = "n8n_custom_secret_key_98765"
     monkeypatch.setenv("N8N_API_TOKEN", n8n_token)
-    c = app.test_client()
+    c = test_db_app.test_client()
 
     # Bearer 헤더로 인증 확인
     res1 = c.get("/internal/api/v1/blocked-ips", headers={"Authorization": f"Bearer {n8n_token}"})
@@ -263,6 +277,27 @@ def test_n8n_api_token_support(app, monkeypatch):
     # X-API-Token 헤더로 인증 확인
     res2 = c.get("/internal/api/v1/blocked-ips", headers={"X-API-Token": n8n_token})
     assert res2.status_code == 200
+
+
+def test_blocked_ips_feed_excludes_protected_ips(lab, monkeypatch):
+    from app import db
+
+    rows = [
+        {"id": 1, "ip_address": "192.168.3.14", "reason": "legacy", "blocked_until": "2099-01-01",
+         "created_at": "2026-10-28", "created_by": "legacy"},
+        {"id": 2, "ip_address": "198.51.100.99", "reason": "test", "blocked_until": "2099-01-01",
+         "created_at": "2026-10-28", "created_by": "test"},
+    ]
+    monkeypatch.setattr(db, "query_all", lambda *_args, **_kwargs: rows)
+    headers = {"Authorization": f"Bearer {TOKEN}"}
+
+    json_response = lab.get("/internal/api/v1/blocked-ips", headers=headers)
+    text_response = lab.get("/internal/api/v1/blocked-ips?format=txt", headers=headers)
+
+    assert json_response.status_code == 200
+    assert [item["ip_address"] for item in json_response.get_json()["items"]] == ["198.51.100.99"]
+    assert text_response.status_code == 200
+    assert text_response.get_data(as_text=True) == "198.51.100.99\n"
 
 
 def _ip_block_client(monkeypatch, security):

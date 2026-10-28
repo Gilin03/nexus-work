@@ -612,7 +612,9 @@ def list_blocked_ips():
         "CASE WHEN blocked_until > NOW() THEN 1 ELSE 0 END AS is_active "
         "FROM blocked_ips ORDER BY blocked_until DESC LIMIT 100"
     )
-    return render_template("admin_blocked_ips.html", rows=rows, prefill_ip=request.args.get("ip", "").strip())
+    rows = [r for r in rows if not security.is_protected_block_ip(r.get("ip_address"))]
+    return render_template("admin_blocked_ips.html", rows=rows, prefill_ip=request.args.get("ip", "").strip(),
+                           error=request.args.get("error", ""))
 
 
 @bp.post("/blocked-ips")
@@ -626,7 +628,12 @@ def add_blocked_ip():
         minutes = 30
     if not ip or ip in ("127.0.0.1", "::1"):
         return redirect(url_for("admin.list_blocked_ips"), 303)
-    security.block_ip(ip, reason=reason, minutes=minutes, created_by=g.user.get("username", "admin"))
+    if security.is_protected_block_ip(ip):
+        log_event("admin_action", "DENY", "protected_ip", action="block_ip", target=ip)
+        return redirect(url_for("admin.list_blocked_ips", error="protected_ip"), 303)
+    if not security.block_ip(ip, reason=reason, minutes=minutes, created_by=g.user.get("username", "admin")):
+        log_event("admin_action", "ERROR", "block_ip_failed", action="block_ip", target=ip)
+        return redirect(url_for("admin.list_blocked_ips", error="block_failed"), 303)
     log_event("admin_action", "ALLOW", "block_ip", action="block_ip", target=ip, block_reason=reason, minutes=minutes)
     return redirect(url_for("admin.list_blocked_ips"), 303)
 
