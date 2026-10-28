@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NEXUS 포트폴리오 - 홍주형</title>
+<style>
+  :root{--bg:#f6f8fb;--card:#fff;--ink:#0f172a;--sub:#475569;--line:#e2e8f0;--brand:#1f5eff;--navy:#0f1a33}
+  @media (prefers-color-scheme: dark){:root{--bg:#0b1220;--card:#111a2e;--ink:#e6edf7;--sub:#9fb0c7;--line:#22304a}}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:"Malgun Gothic","Apple SD Gothic Neo",system-ui,sans-serif;line-height:1.7}
+  .wrap{max-width:1040px;margin:0 auto;padding:0 20px 80px}
+  header.hero{background:var(--navy);color:#fff;padding:64px 20px 56px}
+  header.hero .wrap{padding-bottom:0}
+  .tag{display:inline-block;font-size:13px;padding:3px 12px;border:1px solid #5b7bd5;border-radius:99px;color:#b9c8ff;margin-bottom:16px}
+  h1{font-size:38px;margin:0 0 10px;line-height:1.25}
+  .lead{color:#c8d3ea;max-width:760px;font-size:17px}
+  .meta{display:flex;flex-wrap:wrap;gap:8px 28px;margin-top:24px;color:#9fb2d9;font-size:14px}
+  h2{font-size:26px;margin:56px 0 6px}
+  h2 small{display:block;font-size:14px;color:var(--sub);font-weight:400;margin-top:2px}
+  h3{font-size:18px;margin:28px 0 8px}
+  p{margin:8px 0}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;margin-top:16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 20px}
+  .card b{display:block;font-size:30px;color:var(--brand);line-height:1.2}
+  .card span{color:var(--sub);font-size:14px}
+  .card h4{margin:0 0 6px;font-size:16px}
+  .card p{font-size:14.5px;color:var(--sub);margin:0}
+  figure{margin:20px 0;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  figure img{display:block;width:100%;height:auto}
+  figcaption{padding:12px 18px;font-size:14px;color:var(--sub);border-top:1px solid var(--line)}
+  figcaption b{color:var(--ink)}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media (max-width:760px){.two{grid-template-columns:1fr}h1{font-size:28px}}
+  table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden;font-size:14.5px}
+  th,td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:rgba(31,94,255,.08);width:26%}
+  tr:last-child td,tr:last-child th{border-bottom:0}
+  pre{background:var(--navy);color:#d7e3ff;padding:18px 20px;border-radius:12px;overflow:auto;font-size:13.5px;line-height:1.6}
+  ul{padding-left:20px}
+  li{margin:4px 0}
+  .note{font-size:13px;color:var(--sub);margin-top:40px;border-top:1px solid var(--line);padding-top:14px}
+</style>
+</head>
+<body>
+
+<header class="hero"><div class="wrap">
+  <span class="tag">팀 프로젝트 · 사내 AI Agent 보안 방어전</span>
+  <h1>NEXUS<br>사내 업무 포털 + AI-XDR 보안 관제</h1>
+  <p class="lead">가상 회사의 그룹웨어·ERP·AI 챗봇 포털을 직접 만들고, 모든 입력·권한·세션·DB 접근을 방어했습니다. 이후 Graylog·n8n·AI 판정을 잇는 AI-XDR 파이프라인까지 연결해 탐지에서 대응까지 한 흐름으로 완성했습니다.</p>
+  <div class="meta">
+    <span>홍주형 · 역할 A (웹·DB 하드닝, 포털 아키텍트)</span>
+    <span>Flask · MySQL 8.4 · Socket.IO · Flutter</span>
+    <span>2026.10</span>
+  </div>
+</div></header>
+
+<div class="wrap">
+
+<h2>한눈에 보기<small>숫자로 보는 결과물</small></h2>
+<div class="grid">
+  <div class="card"><b>1,200+</b><span>자동 테스트 (pytest, README 기준) · 현재 테스트 함수 685개</span></div>
+  <div class="card"><b>8,500줄</b><span>포털 백엔드 Python (app/*.py)</span></div>
+  <div class="card"><b>40</b><span>DB 테이블, 최소권한 계정 3종 분리</span></div>
+  <div class="card"><b>12</b><span>탐지 룰(R1~R12) + 디코이 시그니처</span></div>
+</div>
+
+<h2>1. 프로젝트 소개<small>무엇을, 왜 만들었나</small></h2>
+<p>팀 프로젝트의 목표는 <b>사내 AI Agent를 공격과 방어 양쪽에서 검증</b>하는 것이었습니다. 저는 공격 대상이 되는 사내 포털을 만들고 하드닝하는 역할(A)을 맡았습니다. 포털은 실제 회사 업무 흐름을 그대로 담도록 그룹웨어·ERP·HR·AI 어시스턴트를 갖췄고, 네이티브 메신저 앱과 같은 계정 체계로 묶었습니다.</p>
+
+<h3>시스템 구성</h3>
+<pre>브라우저 / 메신저 앱 ──▶ pfSense(WAF·HAProxy) ──▶ NEXUS 포털 (Flask, :5070) ──▶ MySQL (nexus)
+                                                         │ security.jsonl
+                                                         ▼
+                              Wazuh(호스트) ─▶ Graylog(R1~R12 룰) ─▶ n8n ─▶ 포털 AI-XDR API
+                                                                              │
+                                              AI 판정 ─▶ 정책 게이트 ─▶ 승인 대기 / 자동 대응</pre>
+
+<h2>2. 업무 포털<small>그룹웨어 · ERP · HR · AI</small></h2>
+<figure>
+  <img src="screenshots/02_home.png" alt="포털 홈">
+  <figcaption><b>홈 대시보드</b> — 출퇴근, 결재·업무·연차 요약, 공지와 예약을 본인 권한 범위만큼 보여줍니다. 관리자에게만 관리 칸이 나타납니다.</figcaption>
+</figure>
+<div class="two">
+  <figure><img src="screenshots/03_approvals.png" alt="전자결재"><figcaption><b>전자결재</b> — 순차 결재선(최대 5명), 자기 승인 금지(앱+DB 트리거), 양식 5종</figcaption></figure>
+  <figure><img src="screenshots/04_board.png" alt="공지사항"><figcaption><b>공지·게시판</b> — 첨부 업로드를 무해하게 처리(무작위 파일명, 웹루트 밖 저장)</figcaption></figure>
+  <figure><img src="screenshots/07_work_calendar.png" alt="일정"><figcaption><b>일정</b> — 공개 범위(나만·팀·전사), 휴가와 업무 마감 표시</figcaption></figure>
+  <figure><img src="screenshots/06_hr_org.png" alt="조직도"><figcaption><b>인사·조직도</b> — 인사카드, 근태, 휴가 승인</figcaption></figure>
+  <figure><img src="screenshots/08_work_tasks.png" alt="업무 관리"><figcaption><b>업무 관리</b> — 담당자·마감·우선순위·상태 전이·댓글</figcaption></figure>
+  <figure><img src="screenshots/09_library.png" alt="자료실"><figcaption><b>자료실</b> — 폴더형, 파일 버전 이력, 통합 문서 검색</figcaption></figure>
+</div>
+<figure>
+  <img src="screenshots/10_chat_ai.png" alt="AI 어시스턴트">
+  <figcaption><b>AI 어시스턴트</b> — 로그인한 사용자의 권한을 넘지 않는 범위에서 사내 자료로 답합니다. 프롬프트 인젝션 탐지와 도구 호출 거부 로그가 연결되어 있습니다.</figcaption>
+</figure>
+
+<h2>3. 방어 설계<small>하드닝의 핵심</small></h2>
+<table>
+  <tr><th>쿼리</th><td>모든 SQL은 상수 문자열 + 파라미터 바인딩. AST 정적 검사가 테스트로 강제합니다.</td></tr>
+  <tr><th>인증·세션</th><td>Argon2id, 5회 실패 시 15분 잠금, 동일한 실패 메시지(계정 열거 방지), 세션 재발급, 로그아웃·비밀번호 변경 시 이전 쿠키 전부 무효화</td></tr>
+  <tr><th>인가</th><td>역할·소유자·팀 범위를 서버에서 검사하고, 사용자·역할·잠금은 요청마다 DB에서 다시 읽어 즉시 반영</td></tr>
+  <tr><th>출력</th><td>자동 이스케이프, CSP(인라인 스크립트 불가), nosniff, X-Frame-Options</td></tr>
+  <tr><th>DB 권한</th><td>일반 표는 <code>nexus_app</code>, 기밀 표는 <code>nexus_conf</code>(읽기 전용), 자동화는 <code>nexus_n8n</code>로 분리</td></tr>
+  <tr><th>로그</th><td>표준 필드의 JSON 한 줄(<code>security.jsonl</code>). 비밀번호·토큰·대화 내용은 기록하지 않음</td></tr>
+</table>
+<figure>
+  <img src="screenshots/14_admin_permissions.png" alt="권한 현황">
+  <figcaption><b>권한 현황</b> — 직급별·팀별·역할별 권한표와 고정 계정</figcaption>
+</figure>
+
+<h2>4. 보안 관제 · AI-XDR<small>탐지에서 대응까지</small></h2>
+<p>룰셋(R1~R12)이 1차로 거른 이벤트를 AI가 주기적으로 판정하고, 정책 게이트가 시간대와 신뢰도에 따라 <b>반자동(승인형)</b> 또는 <b>자동 대응</b>을 결정합니다. AI 판정만으로 IP를 차단하지 않고, 허용된 정책과 관리자 결정이 있어야 집행합니다.</p>
+<figure>
+  <img src="screenshots/15_security_dashboard.png" alt="보안 대시보드">
+  <figcaption><b>보안 대시보드</b> — 위협 수준(DEFCON), WAF·SIEM·EDR·SOAR 연동 상태, 24시간/7일/30일 요약과 위협 지표. 시각은 모두 KST 기준입니다.</figcaption>
+</figure>
+<figure>
+  <img src="screenshots/12_admin_xdr.png" alt="AI-XDR 판정">
+  <figcaption><b>AI-XDR 2차 판정</b> — 룰·이벤트별 AI 평가(점수·신뢰도·근거), 정책 모드, 연결된 티켓, 승인·반려 버튼</figcaption>
+</figure>
+<div class="two">
+  <figure><img src="screenshots/13_admin_blocked_ips.png" alt="차단 IP"><figcaption><b>차단 IP 관리</b> — 서버·관리 주소는 차단 불가(보호 목록)</figcaption></figure>
+  <figure><img src="screenshots/11_admin_overview.png" alt="관리 현황"><figcaption><b>관리 현황</b> — 사용자·잠금·결재·최근 보안 이벤트</figcaption></figure>
+</div>
+
+<h3>이번에 해결한 문제: <code>/ai-xdr/process</code>가 항상 processed=0</h3>
+<ul>
+  <li><b>증상</b> — 이벤트 수신(202)은 정상인데 판정 처리 건수가 계속 0.</li>
+  <li><b>원인</b> — 이벤트가 가리키는 티켓이 이 서버 DB에 없어서 외래키 위반이 발생했고, <code>INSERT IGNORE</code>가 이를 조용히 삼켰습니다. 에러 로그도 남지 않았습니다.</li>
+  <li><b>해결</b> — 존재하는 티켓만 연결하고, 외부 티켓 ID는 payload에 보존해 화면에 표시. 처리 단계별 진단 로그(<code>xdr_process_debug</code>)를 추가했습니다.</li>
+  <li><b>배운 점</b> — 조용히 실패하는 SQL 옵션(<code>IGNORE</code>)은 영향 행 수를 반드시 확인해야 합니다.</li>
+</ul>
+
+<h2>5. NEXUS Messenger<small>네이티브 데스크톱 앱 (Flutter)</small></h2>
+<p>포털과 같은 계정으로 로그인하는 사내 메신저입니다. 쿠키 대신 <b>SHA-256 해시로 저장되는 토큰</b>을 쓰고, 1:1·그룹 채팅, 파일 전송, 대화창 흔들기, 조직도 연동, 실시간 전송(Socket.IO)을 지원합니다.</p>
+<figure>
+  <img src="screenshots/20_messenger_login.png" alt="메신저 로그인">
+  <figcaption><b>로그인</b> — 사내 서버 자동 연결, SHA-256 토큰 인증</figcaption>
+</figure>
+<div class="two">
+  <figure><img src="screenshots/21_messenger_chat.png" alt="메신저 대화"><figcaption><b>대화</b> — 그룹·1:1, 파일 전송, 빠른 문구, 흔들기 호출</figcaption></figure>
+  <figure><img src="screenshots/22_messenger_org.png" alt="메신저 조직도"><figcaption><b>조직도</b> — 부서별 직원 목록에서 바로 1:1 대화 시작</figcaption></figure>
+</div>
+<table>
+  <tr><th>인증</th><td>웹과 같은 <code>authenticate()</code> 재사용(잠금·열거 방지·속도 제한 공유). 토큰 30일 만료, 로그아웃 시 즉시 폐기</td></tr>
+  <tr><th>CSRF</th><td>쿠키를 쓰지 않으므로 <code>/api/v1/*</code>는 CSRF 대상에서 제외하는 것이 구조상 안전</td></tr>
+  <tr><th>업데이트</th><td>설치 파일 검증(<code>update_verifier</code>)을 거쳐 배포</td></tr>
+</table>
+
+<h2>6. 사용 기술</h2>
+<table>
+  <tr><th>백엔드</th><td>Python, Flask, Flask-SocketIO, Argon2, PyMySQL</td></tr>
+  <tr><th>DB</th><td>MySQL 8.4 (Docker), 최소권한 계정, 트리거로 결재 불변 규칙 강제</td></tr>
+  <tr><th>보안 연동</th><td>pfSense(HAProxy/WAF), Wazuh, Graylog, n8n, Groq/Ollama</td></tr>
+  <tr><th>클라이언트</th><td>Flutter (Windows 데스크톱)</td></tr>
+  <tr><th>검증</th><td>pytest, 방어 점검 스크립트 18항목, 추가 공격 패턴 20항목, nmap·nikto·gobuster·sqlmap·hydra</td></tr>
+</table>
+
+<h2>7. 팀 협업</h2>
+<ul>
+  <li>김태빈 — 보안 관제(Wazuh·Graylog·n8n), 이시헌 — 네트워크(pfSense), 진혜정 — 시스템 관리</li>
+  <li>GitHub PR 기반으로 병합하고, 포털 API(<code>/internal/api/v1/*</code>) 계약을 문서로 공유해 n8n 워크플로와 맞췄습니다.</li>
+  <li>운영 DB 변경은 마이그레이션 스크립트를 먼저 dry-run으로 확인하고, 적용 전에 백업을 받은 뒤 반영했습니다.</li>
+</ul>
+
+<h2>8. 앞으로 개선할 점</h2>
+<ul>
+  <li>포털 HTTPS 전환(앞단 HAProxy에서 TLS 종료, 쿠키 Secure 적용)</li>
+  <li>AI-XDR 승인 경로의 실제 차단(live 모드) 정책 확정</li>
+  <li>의존성 취약점 점검과 부하 검증</li>
+</ul>
+
+<p class="note">모든 데이터는 실습용 가상 데이터입니다. 화면 캡처는 2026-10-28 실행 중인 로컬 환경에서 촬영했습니다.</p>
+</div>
+</body>
+</html>
