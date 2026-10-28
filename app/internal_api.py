@@ -9,7 +9,9 @@
 import hashlib
 import hmac
 import ipaddress
+import json
 import os
+import re
 
 from flask import Blueprint, current_app, jsonify, request
 
@@ -340,4 +342,64 @@ def process_ai_xdr_windows():
     except Exception as exc:  # keeps service diagnostics private; no raw event data is returned.
         log_event("xdr_processing", "ERROR", type(exc).__name__)
         return jsonify(ok=False, error="processing_failed"), 503
+    return jsonify(ok=True, **result)
+
+
+@bp.post("/ai-xdr/decision")
+def decide_ai_xdr_approval():
+    denied = _authorize_xdr("/ai-xdr/decision")
+    if denied:
+        return denied
+    if current_app.config.get("XDR_AUTO_ENABLED", False) or \
+            str(current_app.config.get("XDR_RESPONSE_MODE", "dry-run")).lower() != "dry-run":
+        return jsonify(ok=False, error="dry_run_only"), 409
+
+    data = request.get_json(silent=True)
+    assessment_id = str((data or {}).get("assessment_id", "")).strip()
+    approval_ref = str((data or {}).get("approval_ref", "")).strip()
+    if not isinstance(data, dict) or data.get("status") != "APPROVED" or \
+            not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", assessment_id, re.I) or \
+            not re.fullmatch(re.escape(assessment_id) + r":NX-DB-\d{6,18}", approval_ref, re.I):
+        return jsonify(ok=False, error="invalid_request"), 400
+
+    from . import ai_xdr, db
+    row = db.query_one(
+        "SELECT assessment_id, rule_ids, status, approval_allowed, auto_allowed, policy_reason, verdict, "
+        "threat_score, confidence, response_result FROM security_xdr_assessments WHERE assessment_id = %s",
+        (assessment_id,),
+    )
+    if not row:
+        return jsonify(ok=False, error="assessment_not_found"), 404
+    try:
+        rule_ids = row.get("rule_ids") if isinstance(row.get("rule_ids"), list) else json.loads(row.get("rule_ids") or "[]")
+    except (TypeError, ValueError):
+        rule_ids = []
+    if rule_ids != ["R1"] or row.get("approval_allowed") not in (True, 1, "1") or \
+            row.get("auto_allowed") not in (False, 0, "0") or \
+            row.get("policy_reason") not in {"DAYTIME_APPROVAL", "WEEKEND_APPROVAL"} or \
+            row.get("verdict") != "MALICIOUS" or ai_xdr._policy_threshold_error(row, current_app.config):
+        return jsonify(ok=False, error="approval_not_allowed"), 409
+    if row.get("status") == "APPROVED":
+        previous = row.get("response_result")
+        if isinstance(previous, str):
+            try:
+                previous = json.loads(previous)
+            except ValueError:
+                previous = {}
+        if isinstance(previous, dict) and previous.get("approval_ref") == approval_ref:
+            return jsonify(ok=True, assessment_id=assessment_id, status="APPROVED",
+                           approval_ref=approval_ref, response=previous, idempotent=True)
+        return jsonify(ok=False, error="assessment_not_pending"), 409
+    if row.get("status") != "PENDING":
+        return jsonify(ok=False, error="assessment_not_pending"), 409
+    try:
+        result = ai_xdr.decide_assessment(assessment_id, "APPROVED", None, "n8n_approve_response",
+                                          approval_ref=approval_ref)
+    except LookupError:
+        return jsonify(ok=False, error="assessment_not_found"), 404
+    except RuntimeError:
+        return jsonify(ok=False, error="assessment_not_pending"), 409
+    except Exception as exc:  # do not return database/provider details to the caller.
+        log_event("xdr_assessment_decision", "ERROR", type(exc).__name__, assessment_id=assessment_id)
+        return jsonify(ok=False, error="decision_failed"), 503
     return jsonify(ok=True, **result)

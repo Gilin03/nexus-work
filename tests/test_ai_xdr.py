@@ -60,6 +60,57 @@ def test_normalize_rejects_missing_identity_and_bad_timestamp():
         ai_xdr.normalize_event_payload(bad_time)
 
 
+def test_ingest_preserves_ticket_reference_outside_ai_event_payload(app, monkeypatch):
+    from app import db
+
+    writes = []
+    monkeypatch.setattr(db, "execute_rowcount", lambda sql, params=(): writes.append((sql, params)) or 1)
+
+    with app.app_context():
+        ai_xdr.ingest_event(payload())
+
+    stored = json.loads(writes[0][1][12])
+    assert stored["_ticket_id"] == "NX-DB-000025"
+    assert "ticket_id" not in stored
+
+
+def test_window_processor_returns_external_ticket_when_local_fk_is_stale(app, monkeypatch):
+    from app import db, security
+
+    now = datetime(2026, 10, 26, 11, 30, tzinfo=timezone.utc)
+    window_key = "f" * 64
+    rows = [{
+        "alert_id": "alert-external-ticket", "window_key": window_key, "group_key": "ip:192.0.2.77",
+        "incident_ticket_id": 42, "rule_id": "R1", "event_type": "account_compromise_suspected",
+        "src_ip": "192.0.2.77", "user_name": "test-user", "severity": "medium", "event_count": 1,
+        "occurred_at": now, "event_payload": '{"event_type":"account_compromise_suspected","_ticket_id":"NX-DB-000042"}',
+    }]
+    queries = iter(([{"window_key": window_key, "window_start": now}], rows))
+    monkeypatch.setattr(db, "query_all", lambda *_args, **_kwargs: next(queries))
+    monkeypatch.setattr(db, "query_one", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(db, "execute_rowcount", lambda *_args, **_kwargs: 1)
+    monkeypatch.setattr(security, "log_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(security, "log_xdr_process_debug", lambda **_kwargs: None)
+    monkeypatch.setattr(security, "block_ip", lambda *_args, **_kwargs: pytest.fail("R1 must not block"))
+    def triage(summary, assessment_id):
+        model_input = ai_xdr._model_input(summary, "x" * 32)
+        assert "ticket_ids" not in model_input
+        assert all("ticket_id" not in event for event in model_input["events"])
+        return {"assessment_id": assessment_id, "threat_score": 85, "confidence": 0.9,
+                "verdict": "MALICIOUS", "reasoning": "Synthetic metadata", "recommended_actions": ["review"]}
+
+    monkeypatch.setattr(ai_xdr, "triage", triage)
+    app.config.update({"XDR_AUTO_ENABLED": False, "XDR_RESPONSE_MODE": "dry-run"})
+
+    with app.app_context():
+        result = ai_xdr.process_ready_windows(now=now)
+
+    assert result["processed"] == 1
+    assessment = result["assessments"][0]
+    assert assessment["incident_ticket_id"] is None
+    assert assessment["ticket_ids"] == ["NX-DB-000042"]
+
+
 def test_different_ips_do_not_share_aggregation_window():
     now = datetime(2026, 10, 26, 1, 2, tzinfo=timezone.utc)
     first = ai_xdr.normalize_event_payload(payload(), received_at=now)
@@ -266,6 +317,50 @@ def test_confidence_threshold_boundary_for_auto_rule_candidates(rule_id, confide
 
     assert result["auto_candidate"] is expected
     assert result["auto_allowed"] is expected
+
+
+@pytest.mark.parametrize(
+    "recommended_actions",
+    [["review"], ["block_ip"], ["notify_only"], ["block_ip", "notify_only"],
+     ["review", "block_ip", "notify_only"]],
+)
+def test_r1_supported_recommendations_allow_approval_without_auto_execution(recommended_actions):
+    now = datetime(2026, 10, 26, 0, 30, tzinfo=timezone.utc)
+    assessment = {"threat_score": 80, "confidence": 0.85, "verdict": "MALICIOUS",
+                  "recommended_actions": list(recommended_actions)}
+    policy = ai_xdr.evaluate_policy(
+        assessment,
+        {"rule_ids": ["R1"], "src_ip": "192.0.2.80", "last_seen": now.isoformat()},
+        {"XDR_AUTO_ENABLED": True, "XDR_RESPONSE_MODE": "live", "XDR_AUTO_MIN_SCORE": 80,
+         "XDR_AUTO_MIN_CONFIDENCE": 0.80, "XDR_MAX_EVENT_AGE_SECONDS": 300,
+         "XDR_DAY_START_HOUR": 8, "XDR_DAY_END_HOUR": 20, "XDR_WEEKEND_MODE": "approval"},
+        now=now,
+    )
+
+    assert policy["approval_allowed"] is True
+    assert policy["auto_allowed"] is False
+    assert policy["reason"] == "daytime_requires_approval"
+    assert assessment["recommended_actions"] == recommended_actions
+    assert ai_xdr._assessment_status(assessment, policy, rule_ids=["R1"]) == "PENDING"
+
+
+@pytest.mark.parametrize("score,confidence", [(79, 0.85), (80, 0.79)])
+def test_r1_below_threshold_is_not_left_pending(score, confidence):
+    now = datetime(2026, 10, 26, 0, 30, tzinfo=timezone.utc)
+    assessment = {"threat_score": score, "confidence": confidence, "verdict": "MALICIOUS",
+                  "recommended_actions": ["block_ip"]}
+    policy = ai_xdr.evaluate_policy(
+        assessment,
+        {"rule_ids": ["R1"], "src_ip": "192.0.2.80", "last_seen": now.isoformat()},
+        {"XDR_AUTO_ENABLED": True, "XDR_RESPONSE_MODE": "live", "XDR_AUTO_MIN_SCORE": 80,
+         "XDR_AUTO_MIN_CONFIDENCE": 0.80, "XDR_MAX_EVENT_AGE_SECONDS": 300,
+         "XDR_DAY_START_HOUR": 8, "XDR_DAY_END_HOUR": 20, "XDR_WEEKEND_MODE": "approval"},
+        now=now,
+    )
+
+    assert policy["approval_allowed"] is False
+    assert policy["auto_allowed"] is False
+    assert ai_xdr._assessment_status(assessment, policy, rule_ids=["R1"]) == "NO_ACTION"
 
 
 @pytest.mark.parametrize("confidence,expected_approval", [(0.79, False), (0.80, True), (0.81, True)])
@@ -676,6 +771,47 @@ def test_assessment_approval_in_dry_run_records_decision_without_blocking(app, m
     assert blocks == []
     assert len(writes) == 1
     assert writes[0][1][0] == "APPROVED"
+
+
+def test_assessment_approval_dry_run_is_idempotent_for_same_approval_ref(app, monkeypatch):
+    from app import db, security
+
+    now = datetime(2026, 10, 26, 1, 30, tzinfo=timezone.utc)
+    row = {
+        "assessment_id": "assessment-1", "incident_ticket_id": None, "src_ip": "198.51.100.77",
+        "rule_ids": '["R1"]', "user_names": '["testuser"]', "event_count": 1,
+        "last_seen": now.isoformat(), "verdict": "MALICIOUS", "threat_score": 80, "confidence": 0.85,
+        "reasoning": "synthetic metadata", "recommended_actions": '["block_ip"]',
+        "event_summary": json.dumps({"rule_ids": ["R1"], "src_ip": "198.51.100.77", "last_seen": now.isoformat()}),
+        "status": "PENDING", "response_result": None,
+    }
+    writes = []
+    blocks = []
+    monkeypatch.setattr(db, "query_one", lambda *_args, **_kwargs: row)
+
+    def update(sql, params=()):
+        writes.append((sql, params))
+        row["status"] = params[0]
+        row["response_result"] = params[3]
+        return 1
+
+    monkeypatch.setattr(db, "execute_rowcount", update)
+    monkeypatch.setattr(security, "log_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(security, "block_ip", lambda *args, **kwargs: blocks.append((args, kwargs)) or True)
+    app.config.update({"XDR_RESPONSE_MODE": "dry-run", "XDR_MAX_EVENT_AGE_SECONDS": 300})
+
+    with app.app_context():
+        first = ai_xdr.decide_assessment("assessment-1", "APPROVED", None, "n8n", now=now,
+                                         approval_ref="assessment-1:NX-DB-000046")
+        second = ai_xdr.decide_assessment("assessment-1", "APPROVED", None, "n8n", now=now,
+                                          approval_ref="assessment-1:NX-DB-000046")
+
+    assert first["status"] == second["status"] == "APPROVED"
+    assert first["response"]["reason"] == "dry_run"
+    assert second["idempotent"] is True
+    assert json.loads(row["response_result"])["approval_ref"] == "assessment-1:NX-DB-000046"
+    assert len(writes) == 1
+    assert blocks == []
 
 
 def test_ingest_event_deduplicates_alert_id(app, monkeypatch):
