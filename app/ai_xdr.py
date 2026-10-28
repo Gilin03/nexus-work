@@ -174,7 +174,7 @@ def ingest_event(payload):
         window_seconds=current_app.config.get("XDR_TRIAGE_WINDOW_SECONDS", 180),
     )
     event_payload = dict(normalized["event"])
-    if normalized["ticket_db_id"] is not None:
+    if normalized["ticket_id"]:
         event_payload["_ticket_id"] = normalized["ticket_id"]
     inserted = db.execute_rowcount(
         "INSERT IGNORE INTO security_xdr_events "
@@ -206,8 +206,6 @@ def aggregate_events(rows):
                 raw = {}
         event = {key: value for key, value in raw.items() if key in EVENT_FIELDS and value is not None}
         ticket_id = _text(raw.get("_ticket_id"), 40)
-        if _ticket_db_id(ticket_id) is None:
-            ticket_id = ""
         occurred_at = row.get("occurred_at")
         occurred = _parse_datetime(occurred_at, assume_utc=True)
         parsed.append({
@@ -639,16 +637,19 @@ def _json_value(value, fallback):
 
 def list_assessments(limit=50):
     rows = db.query_all(
-        "SELECT assessment_id, incident_ticket_id, src_ip, user_names, rule_ids, event_types, event_count, "
+        "SELECT assessment_id, incident_ticket_id, JSON_EXTRACT(event_summary, '$.ticket_ids') AS ticket_ids, "
+        "src_ip, user_names, rule_ids, event_types, event_count, "
         "first_seen, last_seen, threat_score, confidence, verdict, reasoning, recommended_actions, policy_mode, "
         "policy_reason, status, response_result, created_at, decided_by, decided_at "
         "FROM security_xdr_assessments ORDER BY created_at DESC LIMIT %s",
         (max(1, min(int(limit), 100)),),
     )
     for row in rows:
-        for key, fallback in (("user_names", []), ("rule_ids", []), ("event_types", []),
+        for key, fallback in (("ticket_ids", []), ("user_names", []), ("rule_ids", []), ("event_types", []),
                               ("recommended_actions", []), ("response_result", {})):
             row[key] = _json_value(row.get(key), fallback)
+        if not isinstance(row["ticket_ids"], list):
+            row["ticket_ids"] = []
         for key in ("first_seen", "last_seen"):
             if row.get(key) is not None:
                 row[key + "_kst"] = _parse_datetime(row[key], assume_utc=True).astimezone(KST).strftime("%Y-%m-%d %H:%M:%S KST")

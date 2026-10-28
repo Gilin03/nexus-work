@@ -25,7 +25,7 @@
           <td>{{ a.status }}<br>{{ a.policy_mode }} · {{ a.policy_reason }}
             {% if a.response_result and a.response_result.auto_candidate %}<br><strong>자동 차단 후보</strong>{% endif %}
             <br>권고: {{ a.recommended_actions | join(', ') }}</td>
-          <td>{% if a.incident_ticket_id %}NX-DB-{{ '%06d'|format(a.incident_ticket_id) }}{% else %}연결 없음{% endif %}</td>
+          <td>{% if a.ticket_ids %}{{ a.ticket_ids | join(', ') }}{% elif a.incident_ticket_id %}NX-DB-{{ '%06d'|format(a.incident_ticket_id) }}{% else %}연결 없음{% endif %}</td>
           <td>
           {% if a.status == 'PENDING' %}
             <form method="post" action="{{ url_for('admin.decide_xdr_assessment', assessment_id=a.assessment_id) }}">
