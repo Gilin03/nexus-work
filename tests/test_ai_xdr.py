@@ -60,21 +60,25 @@ def test_normalize_rejects_missing_identity_and_bad_timestamp():
         ai_xdr.normalize_event_payload(bad_time)
 
 
-def test_ingest_preserves_ticket_reference_outside_ai_event_payload(app, monkeypatch):
+@pytest.mark.parametrize("ticket_id", ["NX-DB-000025", "external-ticket-25"])
+def test_ingest_preserves_ticket_reference_outside_ai_event_payload(app, monkeypatch, ticket_id):
     from app import db
 
     writes = []
     monkeypatch.setattr(db, "execute_rowcount", lambda sql, params=(): writes.append((sql, params)) or 1)
+    event = payload()
+    event["ticket_id"] = ticket_id
 
     with app.app_context():
-        ai_xdr.ingest_event(payload())
+        ai_xdr.ingest_event(event)
 
     stored = json.loads(writes[0][1][12])
-    assert stored["_ticket_id"] == "NX-DB-000025"
+    assert stored["_ticket_id"] == ticket_id
     assert "ticket_id" not in stored
 
 
-def test_window_processor_returns_external_ticket_when_local_fk_is_stale(app, monkeypatch):
+@pytest.mark.parametrize("external_ticket_id", ["NX-DB-000042", "external-ticket-42"])
+def test_window_processor_returns_external_ticket_when_local_fk_is_stale(app, monkeypatch, external_ticket_id):
     from app import db, security
 
     now = datetime(2026, 10, 26, 11, 30, tzinfo=timezone.utc)
@@ -83,7 +87,9 @@ def test_window_processor_returns_external_ticket_when_local_fk_is_stale(app, mo
         "alert_id": "alert-external-ticket", "window_key": window_key, "group_key": "ip:192.0.2.77",
         "incident_ticket_id": 42, "rule_id": "R1", "event_type": "account_compromise_suspected",
         "src_ip": "192.0.2.77", "user_name": "test-user", "severity": "medium", "event_count": 1,
-        "occurred_at": now, "event_payload": '{"event_type":"account_compromise_suspected","_ticket_id":"NX-DB-000042"}',
+        "occurred_at": now, "event_payload": json.dumps({
+            "event_type": "account_compromise_suspected", "_ticket_id": external_ticket_id,
+        }),
     }]
     queries = iter(([{"window_key": window_key, "window_start": now}], rows))
     monkeypatch.setattr(db, "query_all", lambda *_args, **_kwargs: next(queries))
@@ -108,7 +114,7 @@ def test_window_processor_returns_external_ticket_when_local_fk_is_stale(app, mo
     assert result["processed"] == 1
     assessment = result["assessments"][0]
     assert assessment["incident_ticket_id"] is None
-    assert assessment["ticket_ids"] == ["NX-DB-000042"]
+    assert assessment["ticket_ids"] == [external_ticket_id]
 
 
 def test_different_ips_do_not_share_aggregation_window():
@@ -463,13 +469,34 @@ def test_admin_xdr_page_marks_dry_run_auto_candidate(app):
         "event_types": ["login_failure", "not_found"], "event_count": 4, "verdict": "MALICIOUS",
         "threat_score": 91, "confidence": 0.95, "reasoning": "metadata only", "status": "PENDING",
         "policy_mode": "night", "policy_reason": "dry_run", "recommended_actions": ["block_ip"],
-        "incident_ticket_id": 25, "response_result": {"blocked": False, "auto_candidate": True},
+        "incident_ticket_id": None, "ticket_ids": ["NX-DB-000025"],
+        "response_result": {"blocked": False, "auto_candidate": True},
     }
     with app.test_request_context("/admin/xdr"):
         html = render_template("admin_xdr.html", xdr_enabled=True, unavailable=False, result=None,
                                assessments=[assessment], csrf_token=lambda: "test-csrf")
 
     assert "자동 차단 후보" in html
+    assert "NX-DB-000025" in html
+    assert "연결 없음" not in html
+
+
+def test_list_assessments_returns_external_ticket_ids_without_local_fk(app, monkeypatch):
+    from app import db
+
+    row = {
+        "assessment_id": "assessment-test", "incident_ticket_id": None,
+        "ticket_ids": '["NX-DB-000066"]', "user_names": "[]", "rule_ids": '["R1"]',
+        "event_types": '["account_compromise_suspected"]', "recommended_actions": '["review"]',
+        "response_result": '{"reason":"dry_run"}', "first_seen": None, "last_seen": None,
+    }
+    monkeypatch.setattr(db, "query_all", lambda *_args, **_kwargs: [dict(row)])
+
+    with app.app_context():
+        assessments = ai_xdr.list_assessments()
+
+    assert assessments[0]["incident_ticket_id"] is None
+    assert assessments[0]["ticket_ids"] == ["NX-DB-000066"]
 
 
 @pytest.mark.parametrize(
