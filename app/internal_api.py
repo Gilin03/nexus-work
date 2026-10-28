@@ -376,7 +376,10 @@ def decide_ai_xdr_approval():
         rule_ids = []
     if rule_ids != ["R1"] or row.get("approval_allowed") not in (True, 1, "1") or \
             row.get("auto_allowed") not in (False, 0, "0") or \
-            row.get("policy_reason") not in {"DAYTIME_APPROVAL", "WEEKEND_APPROVAL"} or \
+            row.get("policy_reason") not in {
+                "DAYTIME_APPROVAL", "WEEKEND_APPROVAL",
+                "daytime_requires_approval", "weekend_requires_approval",
+            } or \
             row.get("verdict") != "MALICIOUS" or ai_xdr._policy_threshold_error(row, current_app.config):
         return jsonify(ok=False, error="approval_not_allowed"), 409
     if row.get("status") == "APPROVED":

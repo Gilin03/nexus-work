@@ -65,6 +65,8 @@ DDLS = [
       recommended_actions JSON NOT NULL,
       policy_mode         VARCHAR(24) NOT NULL DEFAULT 'dry-run',
       policy_reason       VARCHAR(120) NOT NULL DEFAULT '',
+      auto_allowed        TINYINT(1) NOT NULL DEFAULT 0,
+      approval_allowed    TINYINT(1) NOT NULL DEFAULT 0,
       status              ENUM('PROCESSING','PENDING','APPROVED','REJECTED','FALSE_POSITIVE','NO_ACTION','AUTO_EXECUTED') NOT NULL DEFAULT 'PROCESSING',
       response_result     JSON NULL,
       created_at          DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
@@ -117,12 +119,33 @@ REQUIRED_COLUMNS = {
     "security_xdr_assessments": {"assessment_id", "window_key", "group_key", "incident_ticket_id", "src_ip",
                                   "user_names", "rule_ids", "event_types", "event_count", "first_seen", "last_seen",
                                   "event_summary", "threat_score", "confidence", "verdict", "reasoning",
-                                  "recommended_actions", "policy_mode", "policy_reason", "status", "response_result",
+                                  "recommended_actions", "policy_mode", "policy_reason", "auto_allowed",
+                                  "approval_allowed", "status", "response_result",
                                   "decided_by", "decided_at"},
     "security_xdr_events": {"alert_id", "window_key", "group_key", "window_start", "incident_ticket_id", "src_ip",
                             "user_name", "rule_id", "event_type", "severity", "event_count", "occurred_at",
                             "event_payload", "assessment_id"},
 }
+
+
+def _ensure_policy_columns(cur):
+    cur.execute("SHOW COLUMNS FROM `security_xdr_assessments`")
+    columns = {row[0] for row in cur.fetchall()}
+    approval_missing = "approval_allowed" not in columns
+    for name in ("auto_allowed", "approval_allowed"):
+        if name not in columns:
+            cur.execute(
+                f"ALTER TABLE `security_xdr_assessments` ADD COLUMN `{name}` TINYINT(1) NOT NULL DEFAULT 0"
+            )
+            columns.add(name)
+    if approval_missing:
+        # Keep already-pending, policy-approved R1 rows eligible; decision API rechecks current thresholds.
+        cur.execute(
+            "UPDATE security_xdr_assessments SET approval_allowed = 1 "
+            "WHERE status='PENDING' AND verdict='MALICIOUS' AND JSON_LENGTH(rule_ids)=1 "
+            "AND JSON_UNQUOTE(JSON_EXTRACT(rule_ids, '$[0]'))='R1' "
+            "AND policy_reason IN ('DAYTIME_APPROVAL','WEEKEND_APPROVAL')"
+        )
 
 
 def _validate_schema(cur):
@@ -182,6 +205,7 @@ def migrate(db_name):
         cur = con.cursor()
         for ddl in DDLS:
             cur.execute(ddl)
+        _ensure_policy_columns(cur)
         _validate_schema(cur)
         for grant in GRANTS:
             cur.execute(grant.format(db=db_name))
@@ -200,7 +224,7 @@ def main(argv=None):
         parser.error("production requires --confirm-production")
     if not args.apply:
         print(f"DRY RUN: no database connection; {len(DDLS)} idempotent table statements and "
-              f"{len(GRANTS)} scoped grants are prepared for {args.database}.")
+              f"approval-column compatibility checks and {len(GRANTS)} scoped grants are prepared for {args.database}.")
         return 0
     migrate(args.database)
     return 0

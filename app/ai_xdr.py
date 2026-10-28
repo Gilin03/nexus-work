@@ -594,11 +594,12 @@ def process_ready_windows(limit=1, now=None):
         response_result["auto_candidate"] = policy["auto_candidate"]
         db.execute_rowcount(
             "UPDATE security_xdr_assessments SET threat_score = %s, confidence = %s, verdict = %s, reasoning = %s, "
-            "recommended_actions = %s, policy_mode = %s, policy_reason = %s, status = %s, response_result = %s "
+            "recommended_actions = %s, policy_mode = %s, policy_reason = %s, auto_allowed = %s, "
+            "approval_allowed = %s, status = %s, response_result = %s "
             "WHERE assessment_id = %s AND status = 'PROCESSING'",
             (ai_result["threat_score"], ai_result["confidence"], ai_result["verdict"], ai_result["reasoning"],
-             json.dumps(ai_result["recommended_actions"]), policy["phase"], policy["reason"], status,
-             json.dumps(response_result), assessment_id),
+             json.dumps(ai_result["recommended_actions"]), policy["phase"], policy["reason"],
+             policy["auto_allowed"], policy["approval_allowed"], status, json.dumps(response_result), assessment_id),
         )
         db.execute_rowcount(
             "UPDATE security_xdr_events SET assessment_id = %s WHERE window_key = %s AND assessment_id IS NULL",
