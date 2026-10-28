@@ -1,6 +1,7 @@
 """보안 공통: JSON 이벤트 로그, CSRF, 응답 헤더, IP 단위 요청 제한."""
 import gzip
 import hmac
+import ipaddress
 import json
 import os
 import logging
@@ -16,6 +17,19 @@ from flask import abort, current_app, g, jsonify, render_template, request, sess
 
 _logger = logging.getLogger("nexus.security")
 _logger.propagate = False
+
+PROTECTED_BLOCK_IPS = frozenset({"127.0.0.1", "192.168.3.10", "192.168.3.11", "192.168.3.14", "192.168.3.15", "::1"})
+
+
+def is_protected_block_ip(ip: str) -> bool:
+    try:
+        address = ipaddress.ip_address(str(ip or "").strip())
+    except ValueError:
+        return False
+    mapped = getattr(address, "ipv4_mapped", None)
+    if mapped:
+        address = mapped
+    return address.is_loopback or address.compressed in PROTECTED_BLOCK_IPS
 
 GRAYLOG_FIELDS = {
     "event_type", "source_component", "severity", "user", "role", "src_ip", "method", "path",
@@ -65,7 +79,7 @@ _CACHE_TTL = 3.0  # 초 단위 캐시
 
 def is_ip_blocked(ip: str) -> tuple[bool, str]:
     """해당 IP가 차단되어 있는지 확인 (만료 시간 검사 및 3초 캐시 적용)."""
-    if not ip or ip in ("127.0.0.1", "::1", "-"):
+    if not ip or ip == "-" or is_protected_block_ip(ip):
         return False, ""
 
     now_ts = time.time()
@@ -91,7 +105,7 @@ def is_ip_blocked(ip: str) -> tuple[bool, str]:
 
 def block_ip(ip: str, reason: str = "manual_block", minutes: int = 30, created_by: str = "system") -> bool:
     """IP 차단 등록 (이미 있으면 차단 시간 연장)."""
-    if not ip or ip in ("127.0.0.1", "::1"):
+    if not ip or is_protected_block_ip(ip):
         return False
     try:
         from . import db

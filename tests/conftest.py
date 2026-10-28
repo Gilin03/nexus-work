@@ -19,6 +19,12 @@ def app(tmp_path):
 
 
 @pytest.fixture()
+def test_db_app(app):
+    app.config["DB_NAME"] = "nexus_test"
+    return app
+
+
+@pytest.fixture()
 def client(app):
     return app.test_client()
 

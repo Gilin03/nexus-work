@@ -104,6 +104,19 @@ def test_ip_rate_limit():
     assert security.ip_rate_limited("5.6.7.8", 3) is False  # 다른 IP는 별개
 
 
+@pytest.mark.parametrize("ip", ["127.0.0.1", "::1", "192.168.3.10", "192.168.3.11", "192.168.3.14", "192.168.3.15", "::ffff:192.168.3.10"])
+def test_protected_ips_cannot_be_blocked_or_checked(monkeypatch, ip):
+    from app import db
+
+    calls = []
+    monkeypatch.setattr(db, "execute", lambda *args, **kwargs: calls.append(("write", args)))
+    monkeypatch.setattr(db, "query_one", lambda *args, **kwargs: calls.append(("read", args)))
+
+    assert security.block_ip(ip) is False
+    assert security.is_ip_blocked(ip) == (False, "")
+    assert calls == []
+
+
 # ---------- 의심 입력 기록(차단하지 않고 탐지용 신호만 남긴다) ----------
 SQLI_PROBES = ["' OR '1'='1", "' OR 1=1-- ", "admin'--", "' UNION SELECT NULL,NULL-- ", "'; DROP TABLE users; -- ",
                "1' AND SLEEP(5)-- ", "' OR SLEEP(5)#", "\") OR (\"1\"=\"1", "1; WAITFOR DELAY '0:0:5'--", "%' OR '%'='",
