@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 640" width="1200" height="640" font-family="'Malgun Gothic','Apple SD Gothic Neo','Noto Sans KR',sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#475569"/></marker>
+    <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#1f5eff"/></marker>
+  </defs>
+  <rect width="1200" height="640" fill="#f6f8fb"/>
+
+  <rect x="12" y="44" width="1176" height="146" rx="14" fill="#eaf0ff" stroke="#c9d7ff"/>
+  <text x="30" y="34" font-size="16" font-weight="700" fill="#1f5eff">① 접속 · 서비스</text>
+  <rect x="12" y="340" width="1176" height="276" rx="14" fill="#fff3e6" stroke="#ffd9b0"/>
+  <text x="160" y="330" font-size="16" font-weight="700" fill="#c2570c">② 탐지 · 판정 · 대응 (AI-XDR)</text>
+
+  <g font-size="17" font-weight="700" fill="#0f172a" text-anchor="middle">
+    <g fill="#fff" stroke="#94a3b8" stroke-width="1.5">
+      <rect x="30" y="70" width="200" height="94" rx="12"/>
+      <rect x="290" y="70" width="200" height="94" rx="12"/>
+      <rect x="550" y="70" width="200" height="94" rx="12" fill="#1f5eff" stroke="#1f5eff"/>
+      <rect x="810" y="70" width="200" height="94" rx="12"/>
+    </g>
+    <text x="130" y="108">사용자</text><text x="130" y="134" font-size="14" font-weight="400" fill="#475569">브라우저 · NEXUS Messenger</text>
+    <text x="390" y="108">pfSense</text><text x="390" y="134" font-size="14" font-weight="400" fill="#475569">WAF · HAProxy</text>
+    <text x="650" y="108" fill="#fff">NEXUS 포털</text><text x="650" y="134" font-size="14" font-weight="400" fill="#dbe6ff">Flask · Socket.IO · :5070</text>
+    <text x="910" y="108">MySQL 8.4</text><text x="910" y="134" font-size="14" font-weight="400" fill="#475569">최소권한 계정 3종</text>
+
+    <g fill="#fff" stroke="#94a3b8" stroke-width="1.5">
+      <rect x="30" y="376" width="200" height="94" rx="12"/>
+      <rect x="290" y="376" width="200" height="94" rx="12"/>
+      <rect x="550" y="376" width="200" height="94" rx="12"/>
+      <rect x="810" y="376" width="200" height="94" rx="12" fill="#c2570c" stroke="#c2570c"/>
+      <rect x="810" y="520" width="200" height="74" rx="12"/>
+    </g>
+    <text x="130" y="414">보안 이벤트 로그</text><text x="130" y="440" font-size="14" font-weight="400" fill="#475569">security.jsonl (JSON)</text>
+    <text x="390" y="414">Wazuh · Graylog</text><text x="390" y="440" font-size="14" font-weight="400" fill="#475569">룰 R1~R12 1차 필터</text>
+    <text x="650" y="414">n8n</text><text x="650" y="440" font-size="14" font-weight="400" fill="#475569">워크플로 · 3분 주기 호출</text>
+    <text x="910" y="414" fill="#fff">포털 AI-XDR API</text><text x="910" y="440" font-size="14" font-weight="400" fill="#ffe9d3">AI 판정 → 정책 게이트</text>
+    <text x="910" y="554">AI 모델</text><text x="910" y="577" font-size="14" font-weight="400" fill="#475569">Groq · Ollama</text>
+  </g>
+
+  <rect x="1040" y="376" width="140" height="94" rx="12" fill="#fff" stroke="#c2570c" stroke-width="2"/>
+  <g text-anchor="middle" fill="#0f172a">
+    <text x="1110" y="396" font-size="16" font-weight="700">승인 대기</text>
+    <text x="1110" y="419" font-size="16" font-weight="700">자동 차단</text>
+    <text x="1110" y="444" font-size="12" fill="#475569">주간 반자동</text><text x="1110" y="458" font-size="12" fill="#475569">야간 자동</text>
+  </g>
+
+  <g stroke="#475569" stroke-width="2.2" fill="none" marker-end="url(#a)">
+    <path d="M230 117H288"/><path d="M490 117H548"/><path d="M750 117H808"/>
+    <path d="M230 423H288"/><path d="M490 423H548"/><path d="M750 423H808"/><path d="M1010 423H1038"/>
+  </g>
+  <g stroke="#475569" stroke-width="2.2" fill="none" marker-start="url(#a)" marker-end="url(#a)">
+    <path d="M910 470V518"/>
+  </g>
+  <g stroke="#1f5eff" stroke-width="2.2" fill="none" stroke-dasharray="7 5" marker-end="url(#b)">
+    <path d="M650 164V250H130V374"/>
+    <path d="M1110 376V250H910V166"/>
+  </g>
+  <g font-size="13" fill="#1f5eff" text-anchor="middle">
+    <text x="390" y="243">포털이 남기는 보안 이벤트</text>
+    <text x="1010" y="243">판정 결과 · 차단 IP 저장</text>
+  </g>
+</svg>

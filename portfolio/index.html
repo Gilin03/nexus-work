@@ -69,12 +69,10 @@
 <p>팀 프로젝트의 목표는 <b>사내 AI Agent를 공격과 방어 양쪽에서 검증</b>하는 것이었습니다. 저는 공격 대상이 되는 사내 포털을 만들고 하드닝하는 역할(A)을 맡았습니다. 포털은 실제 회사 업무 흐름을 그대로 담도록 그룹웨어·ERP·HR·AI 어시스턴트를 갖췄고, 네이티브 메신저 앱과 같은 계정 체계로 묶었습니다.</p>
 
 <h3>시스템 구성</h3>
-<pre>브라우저 / 메신저 앱 ──▶ pfSense(WAF·HAProxy) ──▶ NEXUS 포털 (Flask, :5070) ──▶ MySQL (nexus)
-                                                         │ security.jsonl
-                                                         ▼
-                              Wazuh(호스트) ─▶ Graylog(R1~R12 룰) ─▶ n8n ─▶ 포털 AI-XDR API
-                                                                              │
-                                              AI 판정 ─▶ 정책 게이트 ─▶ 승인 대기 / 자동 대응</pre>
+<figure>
+  <img src="screenshots/00_architecture.png" alt="시스템 구성도: 사용자 → pfSense → NEXUS 포털 → MySQL, 포털 보안 로그 → Wazuh·Graylog → n8n → AI-XDR API → 승인 대기·자동 차단">
+  <figcaption><b>시스템 구성도</b> — 위쪽은 사용자가 포털을 쓰는 경로, 아래쪽은 보안 이벤트가 탐지·판정·대응으로 이어지는 경로입니다.</figcaption>
+</figure>
 
 <h2>2. 업무 포털<small>그룹웨어 · ERP · HR · AI</small></h2>
 <figure>
