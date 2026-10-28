@@ -173,6 +173,9 @@ def ingest_event(payload):
         payload,
         window_seconds=current_app.config.get("XDR_TRIAGE_WINDOW_SECONDS", 180),
     )
+    event_payload = dict(normalized["event"])
+    if normalized["ticket_db_id"] is not None:
+        event_payload["_ticket_id"] = normalized["ticket_id"]
     inserted = db.execute_rowcount(
         "INSERT IGNORE INTO security_xdr_events "
         "(alert_id, window_key, group_key, window_start, incident_ticket_id, src_ip, user_name, rule_id, "
@@ -181,7 +184,7 @@ def ingest_event(payload):
         (normalized["alert_id"], normalized["window_key"], normalized["group_key"], normalized["window_start"],
          normalized["ticket_db_id"], normalized["src_ip"], normalized["user"], normalized["rule_id"],
          normalized["event_type"], normalized["severity"], normalized["event_count"], normalized["occurred_at"],
-         json.dumps(normalized["event"], ensure_ascii=False, separators=(",", ":"))),
+         json.dumps(event_payload, ensure_ascii=False, separators=(",", ":"))),
     )
     return {
         "accepted": True,
@@ -202,6 +205,9 @@ def aggregate_events(rows):
             except (TypeError, ValueError):
                 raw = {}
         event = {key: value for key, value in raw.items() if key in EVENT_FIELDS and value is not None}
+        ticket_id = _text(raw.get("_ticket_id"), 40)
+        if _ticket_db_id(ticket_id) is None:
+            ticket_id = ""
         occurred_at = row.get("occurred_at")
         occurred = _parse_datetime(occurred_at, assume_utc=True)
         parsed.append({
@@ -211,6 +217,7 @@ def aggregate_events(rows):
             "event": event,
             "event_count": max(1, min(int(row.get("event_count") or 1), 100000)),
             "ticket_db_id": row.get("incident_ticket_id"),
+            "ticket_id": ticket_id,
         })
     if not parsed:
         raise ValueError("empty_window")
@@ -219,6 +226,7 @@ def aggregate_events(rows):
     users = sorted({item["event"].get("user") or _text(row.get("user_name"), 64) for item, row in zip(parsed, rows) if item["event"].get("user") or row.get("user_name")})
     ips = sorted({item["event"].get("src_ip") or _text(row.get("src_ip"), 64) for item, row in zip(parsed, rows) if item["event"].get("src_ip") or row.get("src_ip")})
     ticket_ids = sorted({int(item["ticket_db_id"]) for item in parsed if item["ticket_db_id"] is not None})
+    external_ticket_ids = sorted({item["ticket_id"] for item in parsed if item["ticket_id"]})
     times = [_parse_datetime(item["occurred_at"]) for item in parsed]
     return {
         "src_ip": ips[0] if len(ips) == 1 else "",
@@ -231,6 +239,7 @@ def aggregate_events(rows):
         "first_seen": min(times).isoformat(timespec="microseconds"),
         "last_seen": max(times).isoformat(timespec="microseconds"),
         "ticket_db_ids": ticket_ids,
+        "ticket_ids": external_ticket_ids,
         "events": parsed[:100],
         "truncated": len(parsed) > 100,
     }
@@ -437,8 +446,6 @@ def _policy_threshold_error(assessment, config):
 def _r1_approval_error(assessment, config):
     if assessment.get("verdict") != "MALICIOUS":
         return "verdict_not_malicious"
-    if assessment.get("recommended_actions") != ["review"]:
-        return "action_not_recommended"
     return _policy_threshold_error(assessment, config)
 
 
@@ -480,10 +487,13 @@ def evaluate_policy(assessment, summary, config, now=None):
             "approval_allowed": False, "reason": reason or "policy_passed"}
 
 
-def _assessment_status(assessment, policy, action_result=None):
+def _assessment_status(assessment, policy, action_result=None, rule_ids=None):
     if action_result is not None:
         return "AUTO_EXECUTED" if action_result.get("blocked") else "PENDING"
-    if assessment.get("verdict") in {"BENIGN", "REVIEW_REQUIRED"} and             "block_ip" not in assessment.get("recommended_actions", []):
+    if rule_ids == ["R1"] and not policy.get("approval_allowed", False):
+        return "NO_ACTION"
+    if assessment.get("verdict") in {"BENIGN", "REVIEW_REQUIRED"} and \
+            "block_ip" not in assessment.get("recommended_actions", []):
         return "NO_ACTION"
     return "PENDING"
 
@@ -539,12 +549,12 @@ def process_ready_windows(limit=1, now=None):
             )
             continue
         summary = _summary_for_rows(rows)
-        ticket_ids = [
+        ticket_db_ids = [
             ticket_id for ticket_id in summary["ticket_db_ids"]
             if db.query_one("SELECT id FROM security_incident_tickets WHERE id = %s", (ticket_id,))
         ]
-        summary["ticket_db_ids"] = ticket_ids
-        ticket_id = ticket_ids[0] if len(ticket_ids) == 1 else None
+        summary["ticket_db_ids"] = ticket_db_ids
+        ticket_id = ticket_db_ids[0] if len(ticket_db_ids) == 1 else None
         assessment_id = str(uuid.uuid4())
         inserted = db.execute_rowcount(
             "INSERT IGNORE INTO security_xdr_assessments "
@@ -579,7 +589,7 @@ def process_ready_windows(limit=1, now=None):
             blocked = security.block_ip(summary["src_ip"], reason=f"ai_xdr_{rule_id}_{reason}", minutes=15, created_by="ai_xdr")
             action_result = {"blocked": bool(blocked), "rule_id": rule_id, "minutes": 15,
                              "reason": "block_succeeded" if blocked else "block_failed"}
-        status = _assessment_status(ai_result, policy, action_result)
+        status = _assessment_status(ai_result, policy, action_result, summary["rule_ids"])
         response_result = action_result or {"blocked": False, "reason": policy["reason"]}
         response_result["auto_candidate"] = policy["auto_candidate"]
         db.execute_rowcount(
@@ -612,7 +622,7 @@ def process_ready_windows(limit=1, now=None):
             "recommended_actions": ai_result["recommended_actions"],
             "rule_ids": summary["rule_ids"],
             "incident_ticket_id": ticket_id,
-            "ticket_ids": [f"NX-DB-{db_id:06d}" for db_id in ticket_ids],
+            "ticket_ids": sorted(set(summary["ticket_ids"]) | {f"NX-DB-{db_id:06d}" for db_id in ticket_db_ids}),
         })
     return {"processed": len(completed), "assessments": completed}
 
@@ -644,37 +654,45 @@ def list_assessments(limit=50):
     return rows
 
 
-def decide_assessment(assessment_id, status, actor_id, actor_name, now=None):
+def decide_assessment(assessment_id, status, actor_id, actor_name, now=None, approval_ref=None):
     if status not in {"APPROVED", "REJECTED", "FALSE_POSITIVE"}:
         raise ValueError("invalid_decision")
     now = _parse_datetime(now or datetime.now(UTC))
     row = db.query_one(
         "SELECT assessment_id, incident_ticket_id, src_ip, rule_ids, user_names, event_count, last_seen, verdict, "
-        "threat_score, confidence, reasoning, recommended_actions, event_summary, status "
+        "threat_score, confidence, reasoning, recommended_actions, event_summary, status, response_result "
         "FROM security_xdr_assessments WHERE assessment_id = %s FOR UPDATE",
         (assessment_id,),
     )
     if not row:
         raise LookupError("assessment_not_found")
+    previous_response = _json_value(row.get("response_result"), {})
     if row["status"] != "PENDING":
+        if status == "APPROVED" and approval_ref and row["status"] == "APPROVED" \
+                and previous_response.get("approval_ref") == approval_ref:
+            return {"assessment_id": assessment_id, "status": "APPROVED", "response": previous_response,
+                    "approval_ref": approval_ref, "idempotent": True}
         raise RuntimeError("assessment_not_pending")
     actions = _json_value(row.get("recommended_actions"), [])
     summary = _json_value(row.get("event_summary"), {})
     result = {"blocked": False, "reason": "no_block_action"}
     if status == "APPROVED" and "block_ip" in actions:
         config = current_app.config
-        error = _block_candidate_error({"recommended_actions": actions}, summary, config, now)
-        if error:
-            result = {"blocked": False, "reason": error}
-        elif str(config.get("XDR_RESPONSE_MODE", "dry-run")).lower() != "live":
+        if str(config.get("XDR_RESPONSE_MODE", "dry-run")).lower() != "live":
             result = {"blocked": False, "reason": "dry_run"}
         else:
-            from .internal_api import AUTO_BLOCK_REASONS
-            rule_id = summary["rule_ids"][0]
-            blocked = security.block_ip(summary["src_ip"], reason=f"ai_xdr_approved_{rule_id}_{AUTO_BLOCK_REASONS[rule_id]}",
-                                        minutes=15, created_by=f"xdr_approval:{actor_id}")
-            result = {"blocked": bool(blocked), "rule_id": rule_id, "minutes": 15,
-                      "reason": "block_succeeded" if blocked else "block_failed"}
+            error = _block_candidate_error({"recommended_actions": actions}, summary, config, now)
+            if error:
+                result = {"blocked": False, "reason": error}
+            else:
+                from .internal_api import AUTO_BLOCK_REASONS
+                rule_id = summary["rule_ids"][0]
+                blocked = security.block_ip(summary["src_ip"], reason=f"ai_xdr_approved_{rule_id}_{AUTO_BLOCK_REASONS[rule_id]}",
+                                            minutes=15, created_by=f"xdr_approval:{actor_id}")
+                result = {"blocked": bool(blocked), "rule_id": rule_id, "minutes": 15,
+                          "reason": "block_succeeded" if blocked else "block_failed"}
+    if approval_ref:
+        result["approval_ref"] = approval_ref
     updated = db.execute_rowcount(
         "UPDATE security_xdr_assessments SET status = %s, decided_by = %s, decided_at = %s, response_result = %s "
         "WHERE assessment_id = %s AND status = 'PENDING'",
@@ -685,4 +703,7 @@ def decide_assessment(assessment_id, status, actor_id, actor_name, now=None):
     security.log_event("xdr_assessment_decision", "INFO", status.lower(), assessment_id=assessment_id,
                        ticket_db_id=row.get("incident_ticket_id"), actor_id=actor_id, actor=actor_name,
                        verdict=row.get("verdict"), threat_score=row.get("threat_score"), response=result)
-    return {"assessment_id": assessment_id, "status": status, "response": result}
+    result_payload = {"assessment_id": assessment_id, "status": status, "response": result}
+    if approval_ref:
+        result_payload["approval_ref"] = approval_ref
+    return result_payload

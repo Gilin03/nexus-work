@@ -87,6 +87,85 @@ def test_blocked_ips_unauthorized(lab):
     assert lab.post("/internal/api/v1/blocked-ips", json={"ip": "1.2.3.4"}, headers=bad_headers).status_code == 401
 
 
+def test_xdr_approval_endpoint_records_only_eligible_r1_dry_run(app, monkeypatch):
+    from app import ai_xdr, db
+
+    monkeypatch.setenv("LAB_INTERNAL_API_TOKEN", TOKEN)
+    app.config.update({"XDR_ENABLED": True, "XDR_AUTO_ENABLED": False, "XDR_RESPONSE_MODE": "dry-run",
+                       "XDR_AUTO_MIN_SCORE": 80, "XDR_AUTO_MIN_CONFIDENCE": 0.8})
+    assessment_id = "632a3638-6845-4904-abba-62a9f9e0e33a"
+    approval_ref = assessment_id + ":NX-DB-000046"
+    row = {"assessment_id": assessment_id, "rule_ids": '["R1"]', "status": "PENDING",
+           "approval_allowed": 1, "auto_allowed": 0, "policy_reason": "DAYTIME_APPROVAL",
+           "verdict": "MALICIOUS", "threat_score": 80, "confidence": 0.85}
+    monkeypatch.setattr(db, "query_one", lambda *_args, **_kwargs: row)
+    calls = []
+
+    def decide(*args, **kwargs):
+        calls.append((args, kwargs))
+        return {"assessment_id": assessment_id, "status": "APPROVED",
+                "response": {"blocked": False, "reason": "dry_run"}, "approval_ref": approval_ref}
+
+    monkeypatch.setattr(ai_xdr, "decide_assessment", decide)
+    response = app.test_client().post("/internal/api/v1/ai-xdr/decision", json={
+        "assessment_id": assessment_id, "status": "APPROVED", "approval_ref": approval_ref,
+    }, headers={"Authorization": f"Bearer {TOKEN}"})
+
+    assert response.status_code == 200
+    assert response.get_json() == {"ok": True, "assessment_id": assessment_id, "status": "APPROVED",
+                                   "approval_ref": approval_ref,
+                                   "response": {"blocked": False, "reason": "dry_run"}}
+    assert calls[0][0] == (assessment_id, "APPROVED", None, "n8n_approve_response")
+    assert calls[0][1]["approval_ref"] == approval_ref
+
+
+def test_xdr_approval_endpoint_fails_closed_outside_dry_run(app, monkeypatch):
+    from app import ai_xdr, db
+
+    monkeypatch.setenv("LAB_INTERNAL_API_TOKEN", TOKEN)
+    app.config.update({"XDR_ENABLED": True, "XDR_AUTO_ENABLED": False, "XDR_RESPONSE_MODE": "live",
+                       "XDR_AUTO_MIN_SCORE": 80, "XDR_AUTO_MIN_CONFIDENCE": 0.8})
+    calls = []
+    assessment_id = "632a3638-6845-4904-abba-62a9f9e0e33a"
+    monkeypatch.setattr(db, "query_one", lambda *_args, **_kwargs: {"assessment_id": assessment_id, "rule_ids": '["R3"]'})
+    monkeypatch.setattr(ai_xdr, "decide_assessment", lambda *args, **kwargs: calls.append(args))
+
+    response = app.test_client().post("/internal/api/v1/ai-xdr/decision", json={
+        "assessment_id": assessment_id, "status": "APPROVED", "approval_ref": assessment_id + ":NX-DB-000046",
+    }, headers={"Authorization": f"Bearer {TOKEN}"})
+
+    assert response.status_code == 409
+    assert response.get_json()["error"] == "dry_run_only"
+    assert calls == []
+
+
+def test_xdr_approval_endpoint_rejects_non_r1_and_auto_enabled(app, monkeypatch):
+    from app import ai_xdr, db
+
+    monkeypatch.setenv("LAB_INTERNAL_API_TOKEN", TOKEN)
+    app.config.update({"XDR_ENABLED": True, "XDR_AUTO_ENABLED": False, "XDR_RESPONSE_MODE": "dry-run",
+                       "XDR_AUTO_MIN_SCORE": 80, "XDR_AUTO_MIN_CONFIDENCE": 0.8})
+    assessment_id = "632a3638-6845-4904-abba-62a9f9e0e33a"
+    row = {"assessment_id": assessment_id, "rule_ids": '["R3"]', "status": "PENDING",
+           "approval_allowed": 1, "auto_allowed": 0, "policy_reason": "DAYTIME_APPROVAL",
+           "verdict": "MALICIOUS", "threat_score": 90, "confidence": 0.95}
+    monkeypatch.setattr(db, "query_one", lambda *_args, **_kwargs: row)
+    calls = []
+    monkeypatch.setattr(ai_xdr, "decide_assessment", lambda *args, **kwargs: calls.append(args))
+    client = app.test_client()
+    body = {"assessment_id": assessment_id, "status": "APPROVED",
+            "approval_ref": assessment_id + ":NX-DB-000046"}
+    headers = {"Authorization": f"Bearer {TOKEN}"}
+
+    denied_rule = client.post("/internal/api/v1/ai-xdr/decision", json=body, headers=headers)
+    assert denied_rule.status_code == 409
+    assert denied_rule.get_json()["error"] == "approval_not_allowed"
+    row["rule_ids"] = '["R1"]'
+    app.config["XDR_AUTO_ENABLED"] = True
+    denied_auto = client.post("/internal/api/v1/ai-xdr/decision", json=body, headers=headers)
+    assert denied_auto.status_code == 409
+    assert denied_auto.get_json()["error"] == "dry_run_only"
+    assert calls == []
 def test_blocked_ips_crud_lifecycle(lab, app, events):
     from app import security
     headers = {"Authorization": f"Bearer {TOKEN}"}
