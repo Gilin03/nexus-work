@@ -87,7 +87,11 @@ def test_blocked_ips_unauthorized(lab):
     assert lab.post("/internal/api/v1/blocked-ips", json={"ip": "1.2.3.4"}, headers=bad_headers).status_code == 401
 
 
-def test_xdr_approval_endpoint_records_only_eligible_r1_dry_run(app, monkeypatch):
+@pytest.mark.parametrize("policy_reason", [
+    "DAYTIME_APPROVAL", "WEEKEND_APPROVAL",
+    "daytime_requires_approval", "weekend_requires_approval",
+])
+def test_xdr_approval_endpoint_records_only_eligible_r1_dry_run(app, monkeypatch, policy_reason):
     from app import ai_xdr, db
 
     monkeypatch.setenv("LAB_INTERNAL_API_TOKEN", TOKEN)
@@ -96,7 +100,7 @@ def test_xdr_approval_endpoint_records_only_eligible_r1_dry_run(app, monkeypatch
     assessment_id = "632a3638-6845-4904-abba-62a9f9e0e33a"
     approval_ref = assessment_id + ":NX-DB-000046"
     row = {"assessment_id": assessment_id, "rule_ids": '["R1"]', "status": "PENDING",
-           "approval_allowed": 1, "auto_allowed": 0, "policy_reason": "DAYTIME_APPROVAL",
+           "approval_allowed": 1, "auto_allowed": 0, "policy_reason": policy_reason,
            "verdict": "MALICIOUS", "threat_score": 80, "confidence": 0.85}
     monkeypatch.setattr(db, "query_one", lambda *_args, **_kwargs: row)
     calls = []

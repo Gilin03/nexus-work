@@ -535,7 +535,7 @@ def test_model_timeout_and_malformed_response_fail_closed(monkeypatch):
     assert ai_xdr.triage({}, "xdr-malformed")["recommended_actions"] == []
 
 
-@pytest.mark.parametrize("rule_id", ["R5", "R6", "R8", "R3", "R11", "R12", "R1"])
+@pytest.mark.parametrize("rule_id", [f"R{i}" for i in range(1, 13)])
 def test_window_processor_reuses_block_ip_only_for_allowed_rules(app, monkeypatch, rule_id, events):
     from app import db, security
 
@@ -576,6 +576,10 @@ def test_window_processor_reuses_block_ip_only_for_allowed_rules(app, monkeypatc
     assert debug["event_rows_count"] == 1
     assert debug["assessment_insert_affected_rows"] == 1
     assert "reason" not in debug
+    assessment_update = next((sql, params) for sql, params in writes
+                             if sql.startswith("UPDATE security_xdr_assessments SET"))
+    assert "auto_allowed = %s" in assessment_update[0]
+    assert "approval_allowed = %s" in assessment_update[0]
     assert bool(blocked) is (rule_id in {"R5", "R6", "R8"})
     assert len(writes) == 3
     assessment = result["assessments"][0]
@@ -588,10 +592,11 @@ def test_window_processor_reuses_block_ip_only_for_allowed_rules(app, monkeypatc
     assert assessment["recommended_actions"] == expected_action
     assert assessment["auto_allowed"] is (rule_id in {"R5", "R6", "R8"})
     assert assessment["approval_allowed"] is (rule_id == "R1")
+    assert assessment_update[1][7:9] == (assessment["auto_allowed"], assessment["approval_allowed"])
     if rule_id == "R1":
         assert assessment["status"] == "PENDING"
     expected_reason = "R1_APPROVAL_REQUIRED" if rule_id == "R1" else (
-        "RULE_NOT_ALLOWED" if rule_id in {"R3", "R11", "R12"} else "POLICY_PASSED"
+        "POLICY_PASSED" if rule_id in {"R5", "R6", "R8"} else "RULE_NOT_ALLOWED"
     )
     assert assessment["policy_reason"] == expected_reason
     assert assessment["policy_reason_detail"] == expected_reason.lower()

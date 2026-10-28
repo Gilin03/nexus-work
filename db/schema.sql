@@ -595,6 +595,8 @@ CREATE TABLE IF NOT EXISTS security_xdr_assessments (
   recommended_actions JSON NOT NULL,
   policy_mode         VARCHAR(24) NOT NULL DEFAULT 'dry-run',
   policy_reason       VARCHAR(120) NOT NULL DEFAULT '',
+  auto_allowed        TINYINT(1) NOT NULL DEFAULT 0,
+  approval_allowed    TINYINT(1) NOT NULL DEFAULT 0,
   status              ENUM('PROCESSING','PENDING','APPROVED','REJECTED','FALSE_POSITIVE','NO_ACTION','AUTO_EXECUTED') NOT NULL DEFAULT 'PROCESSING',
   response_result     JSON NULL,
   created_at          DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
