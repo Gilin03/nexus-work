@@ -252,7 +252,7 @@ def test_blocked_ips_validation(lab):
 
 
 @pytest.mark.parametrize("ip", [
-    "192.168.3.10", "192.168.3.11", "192.168.3.14", "192.168.3.15",
+    "192.168.3.10", "192.168.3.14", "192.168.3.15",
     "::ffff:192.168.3.10",
 ])
 def test_blocked_ips_api_protects_management_and_server_ips(lab, ip):
@@ -263,6 +263,22 @@ def test_blocked_ips_api_protects_management_and_server_ips(lab, ip):
 
     assert response.status_code == 403
     assert response.get_json()["error"] == "ip_whitelisted"
+
+
+def test_blocked_ips_api_allows_192_168_3_11_as_explicit_test_target(lab, monkeypatch):
+    from app import security
+
+    calls = []
+    monkeypatch.setattr(security, "block_ip", lambda *args, **kwargs: calls.append((args, kwargs)) or True)
+    response = lab.post(
+        "/internal/api/v1/blocked-ips",
+        json={"ip": "192.168.3.11", "reason": "synthetic_test", "minutes": 15},
+        headers={"Authorization": f"Bearer {TOKEN}"},
+    )
+
+    assert response.status_code == 200
+    assert calls[0][0] == ("192.168.3.11",)
+    assert calls[0][1]["minutes"] == 15
 
 
 def test_n8n_api_token_support(test_db_app, monkeypatch):
@@ -287,6 +303,8 @@ def test_blocked_ips_feed_excludes_protected_ips(lab, monkeypatch):
          "created_at": "2026-10-28", "created_by": "legacy"},
         {"id": 2, "ip_address": "198.51.100.99", "reason": "test", "blocked_until": "2099-01-01",
          "created_at": "2026-10-28", "created_by": "test"},
+        {"id": 3, "ip_address": "192.168.3.11", "reason": "synthetic_test", "blocked_until": "2099-01-01",
+         "created_at": "2026-10-28", "created_by": "test"},
     ]
     monkeypatch.setattr(db, "query_all", lambda *_args, **_kwargs: rows)
     headers = {"Authorization": f"Bearer {TOKEN}"}
@@ -295,9 +313,9 @@ def test_blocked_ips_feed_excludes_protected_ips(lab, monkeypatch):
     text_response = lab.get("/internal/api/v1/blocked-ips?format=txt", headers=headers)
 
     assert json_response.status_code == 200
-    assert [item["ip_address"] for item in json_response.get_json()["items"]] == ["198.51.100.99"]
+    assert [item["ip_address"] for item in json_response.get_json()["items"]] == ["198.51.100.99", "192.168.3.11"]
     assert text_response.status_code == 200
-    assert text_response.get_data(as_text=True) == "198.51.100.99\n"
+    assert text_response.get_data(as_text=True) == "198.51.100.99\n192.168.3.11\n"
 
 
 def _ip_block_client(monkeypatch, security):
@@ -348,7 +366,7 @@ def test_automated_ip_block_api_reuses_block_ip_and_causes_403_then_expires(app,
     assert client.get("/login", environ_base={"REMOTE_ADDR": "198.51.100.25"}).status_code == 200
 
 
-@pytest.mark.parametrize("ip", ["127.0.0.1", "192.168.3.10", "192.168.3.11", "192.168.3.14", "192.168.3.15"])
+@pytest.mark.parametrize("ip", ["127.0.0.1", "192.168.3.10", "192.168.3.14", "192.168.3.15"])
 def test_automated_ip_block_api_never_blocks_whitelisted_ips(app, monkeypatch, ip):
     from app import security
 

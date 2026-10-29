@@ -29,8 +29,11 @@ def test_graylog_payload_links_existing_ticket_and_dry_run_assessment(app, clien
     with app.app_context():
         try:
             db.query_one("SELECT 1 FROM security_xdr_events LIMIT 1")
+            columns = {row["Field"] for row in db.query_all("SHOW COLUMNS FROM security_xdr_assessments")}
         except Exception as exc:
             pytest.skip(f"nexus_test XDR migration unavailable: {type(exc).__name__}")
+        if not {"approval_allowed", "auto_allowed"}.issubset(columns):
+            pytest.skip("nexus_test XDR policy migration is incomplete")
         ticket_id = db.execute(
             "INSERT INTO security_incident_tickets "
             "(ticket_key, status, src_ip, ticket_type, type_rank, event_count, rule_ids, user_names, "
@@ -100,3 +103,120 @@ def test_graylog_payload_links_existing_ticket_and_dry_run_assessment(app, clien
             db.execute_rowcount("DELETE FROM security_xdr_events WHERE alert_id = %s", (alert_id,))
             db.execute_rowcount("DELETE FROM security_incident_tickets WHERE ticket_key = %s", (ticket_key,))
             db.commit()
+
+
+def test_approved_block_registers_in_test_db_admin_view_and_feed_then_expires(aapp, root, monkeypatch):
+    """Mock only the assessment row; use nexus_test + TEST-NET for the real block table and feed."""
+    from tests.support import as_user, post
+
+    test_ip = "203.0.113.88"
+    dry_id, live_id = str(uuid.uuid4()), str(uuid.uuid4())
+    ticket_key = "NX-DB-000046"
+    monkeypatch.setenv("LAB_INTERNAL_API_TOKEN", "xdr-block-feed-test-token")
+    aapp.config.update({"DB_NAME": "nexus_test", "XDR_ENABLED": True, "XDR_RESPONSE_MODE": "dry-run",
+                        "XDR_IP_BLOCK_ENABLED": False, "XDR_AUTO_MIN_SCORE": 80,
+                        "XDR_AUTO_MIN_CONFIDENCE": 0.8})
+    client = as_user(aapp, "zz_sec")
+
+    with aapp.app_context():
+        try:
+            db.query_one("SELECT ip_address FROM blocked_ips LIMIT 1")
+        except Exception as exc:
+            pytest.skip(f"nexus_test blocked_ips table unavailable: {type(exc).__name__}")
+        security.unblock_ip(test_ip)
+
+    def assessment_row(assessment_id):
+        return {
+            "assessment_id": assessment_id, "incident_ticket_id": None, "src_ip": test_ip,
+            "rule_ids": '["R1"]', "user_names": '["xdr-test"]', "event_count": 1,
+            "last_seen": datetime.now(timezone.utc).isoformat(), "verdict": "MALICIOUS",
+            "threat_score": 90, "confidence": 0.95, "reasoning": "synthetic test only",
+            "recommended_actions": '["block_ip"]',
+            "event_summary": json.dumps({"rule_ids": ["R1"], "src_ip": test_ip, "ticket_ids": [ticket_key]}),
+            "status": "PENDING", "approval_allowed": 1, "auto_allowed": 0,
+            "policy_reason": "DAYTIME_APPROVAL", "response_result": None,
+        }
+
+    rows = {dry_id: assessment_row(dry_id), live_id: assessment_row(live_id)}
+    original_query_one, original_execute_rowcount = db.query_one, db.execute_rowcount
+
+    def query_one(sql, params=(), conf=False):
+        if "FROM security_xdr_assessments WHERE assessment_id = %s FOR UPDATE" in sql:
+            return rows.get(params[0])
+        return original_query_one(sql, params, conf=conf)
+
+    def execute_rowcount(sql, params=()):
+        if sql.startswith("UPDATE security_xdr_assessments SET status = %s"):
+            row = rows.get(params[4])
+            if row and row["status"] == "PENDING":
+                row["status"] = params[0]
+                row["response_result"] = params[3]
+                return 1
+            return 0
+        return original_execute_rowcount(sql, params)
+
+    monkeypatch.setattr(db, "query_one", query_one)
+    monkeypatch.setattr(db, "execute_rowcount", execute_rowcount)
+    monkeypatch.setattr(ai_xdr, "list_assessments", lambda _limit: [
+        {**rows[live_id], "ticket_ids": [ticket_key], "rule_ids": ["R1"],
+         "user_names": ["xdr-test"], "event_types": ["account_compromise_suspected"],
+         "recommended_actions": ["block_ip"], "response_result": {}, "event_count": 1,
+         "last_seen_kst": "2026-10-29 10:00:00 KST", "first_seen_kst": "2026-10-29 10:00:00 KST",
+         "policy_mode": "day", "created_at": "2026-10-29", "decided_at": None,
+         "block_approval_error": ai_xdr._block_approval_error(rows[live_id], aapp.config)}
+    ])
+
+    try:
+        dry_result = post(client, f"/admin/xdr/assessments/{dry_id}/decision", decision="APPROVED_BLOCK_IP")
+        assert dry_result.status_code == 303
+        assert rows[dry_id]["status"] == "APPROVED"
+        assert json.loads(rows[dry_id]["response_result"])["reason"] == "dry_run"
+        with aapp.app_context():
+            assert db.query_one("SELECT ip_address FROM blocked_ips WHERE ip_address = %s", (test_ip,)) is None
+
+        # The live gate is set only on the nexus_test app instance; no production assessment/DB is used.
+        aapp.config.update({"XDR_RESPONSE_MODE": "live", "XDR_IP_BLOCK_ENABLED": True})
+        pending_page = client.get("/admin/xdr")
+        pending_html = pending_page.get_data(as_text=True)
+        assert pending_page.status_code == 200
+        assert live_id in pending_html and 'value="APPROVED_BLOCK_IP"' in pending_html
+        live_result = post(client, f"/admin/xdr/assessments/{live_id}/decision", decision="APPROVED_BLOCK_IP")
+        assert live_result.status_code == 303
+        assert rows[live_id]["status"] == "APPROVED"
+        assert json.loads(rows[live_id]["response_result"])["reason"] == "block_succeeded"
+
+        with aapp.app_context():
+            blocked = db.query_one(
+                "SELECT ip_address, reason, created_by, TIMESTAMPDIFF(SECOND, NOW(), blocked_until) AS seconds_left "
+                "FROM blocked_ips WHERE ip_address = %s", (test_ip,),
+            )
+            assert blocked["ip_address"] == test_ip
+            assert live_id in blocked["reason"] and ticket_key in blocked["reason"] and "R1" in blocked["reason"]
+            assert blocked["created_by"] == "ai_xdr_admin"
+            assert 14 * 60 <= blocked["seconds_left"] <= 15 * 60
+
+        blocked_page = client.get("/admin/blocked-ips")
+        assert blocked_page.status_code == 200
+        assert test_ip in blocked_page.get_data(as_text=True)
+
+        headers = {"Authorization": "Bearer xdr-block-feed-test-token"}
+        json_feed = client.get("/internal/api/v1/blocked-ips", headers=headers)
+        text_feed = client.get("/internal/api/v1/blocked-ips?format=txt", headers=headers)
+        assert json_feed.status_code == text_feed.status_code == 200
+        assert any(item["ip_address"] == test_ip for item in json_feed.json["items"])
+        assert test_ip in text_feed.get_data(as_text=True).splitlines()
+
+        with aapp.app_context():
+            db.execute_rowcount(
+                "UPDATE blocked_ips SET blocked_until = DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE ip_address = %s",
+                (test_ip,),
+            )
+            db.commit()
+            security._blocked_ip_cache.pop(test_ip, None)
+            assert security.is_ip_blocked(test_ip)[0] is False
+        expired_feed = client.get("/internal/api/v1/blocked-ips?format=txt", headers=headers)
+        assert expired_feed.status_code == 200
+        assert test_ip not in expired_feed.get_data(as_text=True).splitlines()
+    finally:
+        with aapp.app_context():
+            security.unblock_ip(test_ip)

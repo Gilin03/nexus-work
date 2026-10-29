@@ -1,0 +1,2391 @@
+{
+  "name": "NEXUS 탐지 알림 수신 v3 - AI-XDR 평가 Discord 후보",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "nexus-alert",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "a1f0c0de-0001-4000-8000-000000000001",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        224
+      ],
+      "webhookId": "a1f0c0de-0001-4000-8000-0000000000aa",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "AFvgWFphn8WEBgwz",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "schema-1-1-required-envelope",
+              "leftValue": "={{ !!$json.contract_valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1f0c0de-0002-4000-8000-000000000002",
+      "name": "schema_version·필수 식별자 검증",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        672,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const inp = $input.first().json || {};\nconst raw = inp.body || {};\nconst srcEvent = raw.event || {};\nconst sd = $getWorkflowStaticData('global');\nconst miss = v => v === undefined || v === null || v === '' || v === '-';\nconst text = (v, max = 200) => {\n  if (miss(v) || !['string', 'number', 'boolean'].includes(typeof v)) return '';\n  return String(v).replace(/[\\u0000-\\u001f\\u007f]/g, ' ').trim().slice(0, max);\n};\nconst num = v => Number.isFinite(Number(v)) ? Number(v) : undefined;\nconst rules = {\n  R1: { stable: 'ACCOUNT_COMPROMISE', action: 'contain', events: ['account_compromise_suspected', 'account_locked'] },\n  R2: { stable: 'DIRECT_PROMPT_INJECTION_BLOCKED', action: 'alert', events: ['prompt_injection_detected'] },\n  R3: { stable: 'AI_TOOL_PERMISSION_DENIED', action: 'contain', events: ['agent_tool_call'] },\n  R4: { stable: 'UNEXPECTED_INTERNAL_API_CALL', action: 'alert', events: ['internal_api'] },\n  R5: { stable: 'ACCOUNT_SPRAY', action: 'alert', events: ['login_failure'] },\n  R6: { stable: 'POST_LOCK_RETRY', action: 'alert', events: ['post_lock_retry_detected'] },\n  R7: { stable: 'OFF_HOURS_LOGIN_SUCCESS', action: 'observe', events: ['login_success'] },\n  R8: { stable: 'NOT_FOUND_SCAN', action: 'alert', events: ['not_found'] },\n  R9: { stable: 'ADMIN_PATH_ACCESS_DENIED', action: 'alert', events: ['authz_deny'] },\n  R10: { stable: 'DIRECT_CONFIDENTIAL_ACCESS_DENIED', action: 'alert', events: ['authz_deny'] },\n  R11: { stable: 'REPEATED_AI_TOOL_PERMISSION_DENIAL', action: 'contain', events: ['agent_tool_call'] },\n  R12: { stable: 'CONTENT_TRIGGERED_PROTECTED_TOOL_DENIAL', action: 'contain', events: ['agent_tool_call'] }\n};\nconst expectedSeverity = {\n  R1: { account_compromise_suspected: 'high', account_locked: 'medium' },\n  R2: { prompt_injection_detected: 'high' }, R3: { agent_tool_call: 'high' }, R5: { login_failure: 'medium' },\n  R6: { post_lock_retry_detected: 'high' }, R7: { login_success: 'info' },\n  R8: { not_found: 'info' }, R9: { authz_deny: 'medium' }, R10: { authz_deny: 'medium' }, R11: { agent_tool_call: 'high' }, R12: { agent_tool_call: 'high' }\n};\nconst id = text(raw.rule && raw.rule.id, 8);\nconst alertId = text(raw.alert && raw.alert.id, 160);\nconst contractValid = raw.schema_version === '1.1' && !!id && !!alertId && !!raw.event && typeof raw.event === 'object' && !Array.isArray(raw.event);\nconst ruleMeta = rules[id];\nconst evType = text(srcEvent.event_type, 80);\nconst severity = text((raw.rule && raw.rule.severity) || srcEvent.severity || raw.severity, 24).toLowerCase();\nconst actionLevel = text(raw.action_level, 24).toLowerCase();\nconst priority = num(raw.alert && raw.alert.priority);\nconst timestamp = text(raw.alert && raw.alert.timestamp, 64);\nconst timestampValid = !!timestamp && Number.isFinite(Date.parse(timestamp));\nconst stable = text(raw.rule && raw.rule.stable_name, 100);\nconst display = text(raw.rule && raw.rule.display_name, 180);\nconst supported = contractValid && !!ruleMeta && stable === ruleMeta.stable && ruleMeta.events.includes(evType);\nconst priorityValid = Number.isInteger(priority) && [1, 2, 3].includes(priority);\nconst severityValid = ['info', 'low', 'medium', 'high', 'critical'].includes(severity);\nconst severityMatches = !expectedSeverity[id] || expectedSeverity[id][evType] === severity;\nconst metadataValid = !!ruleMeta && stable === ruleMeta.stable && actionLevel === ruleMeta.action && severityValid && severityMatches && priorityValid && timestampValid;\n\n// Strict allowlist: message/body/prompt/password/token/cookie and arbitrary Graylog fields are omitted.\nconst allowed = ['event_type', 'injection_type', 'source_type', 'source_component', 'trigger_source',\n  'user', 'role', 'src_ip', 'request_id', 'session_id', 'tool_name', 'resource_class',\n  'resource_id', 'trigger_resource_id', 'pattern_id', 'decision', 'reason', 'severity',\n  'path', 'resource', 'required', 'count', 'window_seconds', 'failed_attempts',\n  'lock_request_id', 'trigger_event_type'];\nconst event = {};\nfor (const key of allowed) {\n  if (!Object.prototype.hasOwnProperty.call(srcEvent, key)) continue;\n  const value = srcEvent[key];\n  if (['count', 'window_seconds', 'failed_attempts'].includes(key)) {\n    const n = num(value);\n    if (Number.isFinite(n)) event[key] = n;\n  } else {\n    const v = text(value, ['path', 'resource'].includes(key) ? 240 : 180);\n    if (v) event[key] = key === 'decision' ? v.toUpperCase() : v;\n  }\n}\nconst evidenceAllow = new Set(['event_count', 'distinct_users', 'retry_count', 'denied_calls',\n  'failed_attempts', 'success_after_failures', 'window_seconds', 'correlation_window_seconds',\n  'after_event', 'prior_event_type', 'lock_request_id', 'trigger_event_type', 'timezone', 'local_time']);\nif (srcEvent.evidence && typeof srcEvent.evidence === 'object' && !Array.isArray(srcEvent.evidence)) {\n  const evidence = {};\n  for (const [key, value] of Object.entries(srcEvent.evidence)) {\n    if (!evidenceAllow.has(key)) continue;\n    if (typeof value === 'number' && Number.isFinite(value)) evidence[key] = value;\n    else if (typeof value === 'boolean') evidence[key] = value;\n    else if (typeof value === 'string' && !miss(value)) evidence[key] = text(value, 160);\n  }\n  if (Object.keys(evidence).length) event.evidence = evidence;\n}\nconst decision = text(event.decision, 16).toUpperCase();\nconst decisionValid = ['ALLOW', 'DENY', 'BLOCK', 'WARN', 'INFO'].includes(decision);\nconst hasDecision = decisionValid;\nconst srcIp = text(event.src_ip, 64);\nconst user = text(event.user, 80);\nconst ticketKey = srcIp ? 'ip:' + srcIp : (user ? 'user:' + user : '');\nlet evidenceValid = true;\nif (id === 'R1' && evType === 'account_compromise_suspected') evidenceValid = Number(event.failed_attempts) >= 3 && Number(event.window_seconds) === 300;\nif (id === 'R2') evidenceValid = event.injection_type === 'direct' && decision === 'DENY' &&\n  ['ignore_previous_instructions', 'reveal_hidden_prompt', 'policy_bypass_protected_data'].includes(event.pattern_id) &&\n  !!user && !!srcIp && !!event.request_id && !!event.session_id;\nif (id === 'R5') evidenceValid = !!srcIp;\nif (id === 'R6') evidenceValid = evType === 'post_lock_retry_detected' && !!user && !!srcIp &&\n  !!event.lock_request_id && Number.isInteger(event.count) && event.count >= 3 && Number(event.window_seconds) === 300;\nif (id === 'R7') evidenceValid = !!user && !!srcIp;\nif (id === 'R8') evidenceValid = !!srcIp;\nif (id === 'R9') evidenceValid = !!user && !!event.path;\nif (id === 'R10') evidenceValid = !!user && !!event.path && !!event.resource;\nif (id === 'R3' || id === 'R11' || id === 'R12') evidenceValid = !!user && !!event.tool_name;\nif (id === 'R4') evidenceValid = !!event.caller_service || !!event.source_component || !!srcIp;\nif (id === 'R1' && evType === 'account_locked') evidenceValid = true;\n\nconst decisionConsistent = id === 'R1'\n  ? (evType === 'account_compromise_suspected' ? decision === 'WARN' : ['DENY', 'BLOCK'].includes(decision))\n  : id === 'R2' ? decision === 'DENY'\n  : ['R3', 'R11', 'R12'].includes(id) ? decision === 'DENY'\n  : id === 'R5' ? (!hasDecision || decision === 'DENY')\n  : id === 'R6' ? (!hasDecision || decision === 'WARN')\n  : id === 'R7' ? (!hasDecision || decision === 'ALLOW')\n  : id === 'R8' ? (!hasDecision || decision === 'INFO')\n  : ['R9', 'R10'].includes(id) ? (!hasDecision || ['DENY', 'BLOCK'].includes(decision))\n  : id === 'R4' ? (!hasDecision || ['ALLOW', 'DENY', 'BLOCK'].includes(decision)) : false;\nconst autoAllowed = contractValid && supported && metadataValid && evidenceValid && hasDecision && decisionConsistent &&\n  !['R1', 'R2', 'R4', 'R5', 'R6', 'R7', 'R8', 'R9', 'R10'].includes(id);\nconst notificationAllowed = contractValid && supported && stable === ruleMeta.stable && priorityValid && timestampValid &&\n  severityValid && severityMatches && evidenceValid && actionLevel === ruleMeta.action && decisionConsistent;\nlet responseGroup = 'notify';\nif (supported && id === 'R1') responseGroup = 'lock';\nif (autoAllowed && ['R3', 'R11', 'R12'].includes(id)) responseGroup = 'session_ai';\n// R4 stays on alert/ticket route; token revocation remains pending.\nconst eventTypeSeverity = expectedSeverity[id] && expectedSeverity[id][evType];\nconst plannedActions = id === 'R1' && evType === 'account_compromise_suspected'\n  ? ['이상 징후 경보', '티켓', '자동 계정 잠금 금지']\n  : id === 'R1' && evType === 'account_locked'\n    ? ['기존 잠금 결과 기록', '티켓', '추가 잠금 금지']\n    : ['알림', '티켓'];\nif (['R3', 'R11', 'R12'].includes(id)) plannedActions.push('DENY 및 정책 검증 시 세션 종료', 'AI Tool 제한은 pending');\nif (id === 'R4') plannedActions.push('내부 API 토큰 폐기는 placeholder/pending');\n\nlet fallbackReason = '';\nif (!contractValid) fallbackReason = 'schema_version_or_required_envelope_field_invalid';\nelse if (!supported) fallbackReason = 'unsupported_rule_or_stable_name_or_event_type';\nelse if (!priorityValid) fallbackReason = 'graylog_priority_must_be_1_to_3';\nelse if (!timestampValid) fallbackReason = 'alert_timestamp_missing_or_invalid';\nelse if (!evidenceValid) fallbackReason = 'rule_evidence_missing_or_invalid';\nelse if (!metadataValid) fallbackReason = 'rule_metadata_missing_or_invalid';\nelse if (!hasDecision && ['R1','R2','R3','R4','R11','R12'].includes(id)) fallbackReason = 'decision_missing_or_invalid';\nelse if (!decisionConsistent) fallbackReason = 'decision_inconsistent_with_rule';\nelse if (!ticketKey) fallbackReason = 'no_safe_ticket_key';\nconst seen = sd.seen && typeof sd.seen === 'object' && !Array.isArray(sd.seen) ? sd.seen : {};\nconst duplicate = !!alertId && !!seen[alertId];\nif (duplicate) fallbackReason = 'duplicate_alert_id';\nconst cfg = inp;\nconst mode = cfg.response_mode === 'live' ? 'live' : 'dry-run';\nconst liveEnabled = cfg.live_enabled === true;\nconst severityLabel = severity || '';\nconst bits = [`[${id || 'UNKNOWN'}] ${display || stable || '지원하지 않는 규칙'}`, `출발지 ${srcIp || (user ? 'user:' + user : '-')}`, `계정 ${user || '-'}`, `이벤트 ${evType || '-'}`, `시각 ${timestamp || '-'}`];\nif (Number.isFinite(event.count)) bits.push(`${event.count}건`);\nif (hasDecision) bits.push('판정 ' + decision);\nif (event.tool_name) bits.push('Tool ' + event.tool_name);\nif (severityLabel) bits.push('심각도 ' + severityLabel);\nif (plannedActions.length) bits.push('대응 계획: ' + plannedActions.join(', '));\nreturn [{ json: {\n  schema_version: text(raw.schema_version, 8), contract_valid: contractValid,\n  rule_id: id, rule: { id, stable_name: stable, display_name: display, severity: severity || undefined },\n  alert: { id: alertId, timestamp, priority }, event, severity: severity || undefined,\n  src_ip: srcIp, user, request_id: text(event.request_id, 120), session_id: text(event.session_id, 120),\n  tool_name: text(event.tool_name, 120), count: Number.isFinite(event.count) ? event.count : 1,\n  first_seen: timestamp, last_seen: timestamp,\n  graylog_event_id: alertId, ticket_key: ticketKey,\n  ticket_type: id === 'R1' && evType === 'account_locked' ? '잠금 결과 기록' : (id === 'R1' ? '이상 징후 경보' : '보안 경보'),\n  response_group: responseGroup, actions: plannedActions, message: bits.join(' | '),\n  decision, action_level: actionLevel, auto_response_allowed: autoAllowed,\n  discord_enabled: cfg.discord_enabled === true && notificationAllowed && actionLevel !== 'observe',\n  response_mode: mode, live_enabled: liveEnabled,\n  lock_minutes: cfg.lock_minutes, ip_block_enabled: cfg.ip_block_enabled === true, whitelist_ips: Array.isArray(cfg.whitelist_ips) ? cfg.whitelist_ips : [],\n  duplicate, skip_side_effects: duplicate || !!fallbackReason, fallback_reason: fallbackReason || undefined,\n  rule_metadata_severity: severity || undefined,\n  priority_source: 'graylog.alert.priority', priority_preserved: priority\n} }];"
+      },
+      "id": "a1f0c0de-0003-4000-8000-000000000003",
+      "name": "정규화·대응 계획",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nconst sd = $getWorkflowStaticData('global');\nsd.whitelist = sd.whitelist || {};\nsd.skipped = sd.skipped || [];\nconst whitelist = Array.isArray(d.whitelist_ips) ? d.whitelist_ips.map(String) : [];\nif (d.src_ip && (whitelist.includes(d.src_ip) || sd.whitelist[d.src_ip])) {\n  sd.skipped.unshift({ time: d.last_seen, src_ip: d.src_ip, rule_id: d.rule_id });\n  sd.skipped = sd.skipped.slice(0, 50);\n  return [{ json: { ...d, whitelisted: true, skip_side_effects: true } }];\n}\nconst rank = { '이상 징후 경보': 1, '보안 경보': 1, '잠금 결과 기록': 2, '차단 조치': 2, '침해 인시던트': 3 };\nconst allowed = new Set(['event_type','injection_type','source_type','source_component','trigger_source','user','role','src_ip',\n  'request_id','session_id','tool_name','resource_class','resource_id','trigger_resource_id','pattern_id','decision','reason',\n  'severity','path','resource','required','count','window_seconds','failed_attempts','lock_request_id','trigger_event_type','evidence']);\nconst event = {};\nfor (const [key, value] of Object.entries(d.event || {})) if (allowed.has(key)) event[key] = value;\nconst safe = { rule: d.rule, alert: d.alert, event, action_level: d.action_level, decision: d.decision };\nconst eventCount = Math.max(1, Math.min(100000, Math.floor(Number(d.count) || 1)));\nconst timestamp = String(d.last_seen || d.alert?.timestamp || new Date().toISOString());\nconst receiptId = String($execution.id || `${Date.now()}-${Math.random()}`).slice(0, 64);\nreturn [{ json: { ...d, ticket_record: {\n  alert_id: String(d.graylog_event_id), receipt_id: receiptId,\n  rule_id: String(d.rule_id), event_type: String(event.event_type || ''),\n  user: String(d.user || ''), src_ip: String(d.src_ip || ''), event_count: eventCount,\n  timestamp, ticket_key: String(d.ticket_key), ticket_type: String(d.ticket_type || '보안 경보'),\n  type_rank: Number(rank[d.ticket_type] || 1), rule_id_for_ticket: String(d.rule_id),\n  event_payload: JSON.stringify(safe),\n  params: [String(d.graylog_event_id), receiptId, String(d.rule_id), String(event.event_type || ''), String(d.user || ''),\n    String(d.src_ip || ''), eventCount, timestamp, JSON.stringify(safe), String(d.ticket_key), String(d.ticket_type || '보안 경보'),\n    Number(rank[d.ticket_type] || 1)]\n} } }];"
+      },
+      "id": "a1f0c0de-0008-4000-8000-000000000008",
+      "name": "티켓 기록(출발지별)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "c2",
+              "leftValue": "={{ $json.discord_enabled }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1f0c0de-0004-4000-8000-000000000004",
+      "name": "Discord 설정됨?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1792,
+        48
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "webhook",
+        "content": "={{ $json.message }}",
+        "options": {}
+      },
+      "id": "a1f0c0de-0005-4000-8000-000000000005",
+      "name": "Discord 알림",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [
+        2016,
+        -48
+      ],
+      "webhookId": "898fc63f-cfaf-4684-b30e-1055899fa231",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "discordWebhookApi": {
+          "id": "6CL2cQrlmyd7kHx2",
+          "name": "Discord Webhook account"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {},
+      "id": "a1f0c0de-0006-4000-8000-000000000006",
+      "name": "Discord 건너뜀(미설정·관찰·시험)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2016,
+        144
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "a1f0c0de-0007-4000-8000-000000000007",
+      "name": "payload 계약 오류",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        896,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "r-R1",
+                    "leftValue": "={{ $json.response_group }}",
+                    "rightValue": "lock",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "계정 잠금"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "r-R2",
+                    "leftValue": "={{ $json.response_group }}",
+                    "rightValue": "notify",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "알림·티켓"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "r-R3",
+                    "leftValue": "={{ $json.response_group }}",
+                    "rightValue": "session_ai",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "세션·AI Tool"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "r-R4",
+                    "leftValue": "={{ $json.response_group }}",
+                    "rightValue": "token",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "토큰 폐기"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1f0c0de-0009-4000-8000-000000000009",
+      "name": "규칙별 대응",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        1792,
+        400
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "a1f0c0de-0011-4000-8000-000000000011",
+      "name": "대응 자리: 알림·티켓만(R2,R5~R10)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2016,
+        528
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "a1f0c0de-0013-4000-8000-000000000013",
+      "name": "대응 자리: 내부 API 토큰 폐기(R4)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2016,
+        720
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({status: $json.duplicate ? \"duplicate\" : ($json.fallback_reason ? \"fallback\" : ($json.whitelisted ? \"whitelisted\" : \"accepted\")), rule_id: $json.rule_id || undefined, alert_id: $json.graylog_event_id || undefined}) }}",
+        "options": {
+          "responseCode": "={{ $json.fallback_reason && !$json.duplicate ? 202 : 200 }}"
+        }
+      },
+      "id": "a1f0c0de-0014-4000-8000-000000000014",
+      "name": "응답(중복·fallback·화이트리스트)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1568,
+        32
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({status:\"invalid_payload\", reason:\"schema_version_or_required_envelope_field_invalid\"}) }}",
+        "options": {
+          "responseCode": 422
+        }
+      },
+      "id": "a1f0c0de-0015-4000-8000-000000000015",
+      "name": "응답 422(계약 오류)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1120,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "path": "nexus-tickets",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "a1f0c0de-0016-4000-8000-000000000016",
+      "name": "상황판 조회(GET)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        944
+      ],
+      "webhookId": "a1f0c0de-0016-4000-8000-0000000000bb",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "AFvgWFphn8WEBgwz",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $('NEXUS 안전 설정(조회)').first().json || {};\nconst db = $input.first().json || {};\nconst sd = $getWorkflowStaticData('global');\nsd.tickets = sd.tickets || {}; sd.history = sd.history || []; sd.whitelist = sd.whitelist || {}; sd.skipped = sd.skipped || [];\nconst parse = (v, fallback) => {\n  if (Array.isArray(v) || (v && typeof v === 'object')) return v;\n  if (typeof v === 'string') { try { return JSON.parse(v); } catch {} }\n  return fallback;\n};\nconst rows = parse(db.ticket_rows, []);\nconst dbTickets = rows.map(t => ({\n  id: `NX-DB-${String(t.id).padStart(6, '0')}`, ticket_key: t.ticket_key, src_ip: t.src_ip || '',\n  type: t.ticket_type, rules: parse(t.rule_ids, []), users: parse(t.user_names, []),\n  count: Number(t.event_count || 0), first_seen: t.first_seen, last_seen: t.last_seen,\n  status: t.status, latest: parse(t.latest_event, {}), resolution: t.resolution || undefined,\n  closed_at: t.closed_at || undefined, note: t.note || undefined,\n  responses: parse(t.responses, [])\n}));\nconst all = [...dbTickets, ...Object.values(sd.tickets), ...sd.history]\n  .sort((a,b) => String(b.last_seen || '').localeCompare(String(a.last_seen || '')));\nconst pendingMap = sd.pendingActions && typeof sd.pendingActions === 'object' && !Array.isArray(sd.pendingActions) ? sd.pendingActions : {};\nfor (const ticket of [...dbTickets, ...Object.values(sd.tickets), ...sd.history]) {\n  const plans = Object.values(pendingMap).filter(p => p && p.ticket_id === ticket.id && ['pending', 'executing'].includes(p.status));\n  ticket.pending_approval = plans.some(p => p.status === 'pending');\n  ticket.pending_actions = plans.map(p => ({ plan_id: p.plan_id, assessment_id: p.assessment_id,\n    rule_id: p.rule_id, response_group: p.response_group, status: p.status, saved_at: p.saved_at,\n    assessment_status: p.assessment_status, approval_allowed: p.approval_allowed,\n    auto_allowed: p.auto_allowed, policy_reason: p.policy_reason,\n    verdict: p.verdict, threat_score: p.threat_score }));\n}\nconst open = all.filter(t => t.status === 'open');\nconst by_type = {};\nfor (const t of open) by_type[t.type] = (by_type[t.type] || 0) + 1;\nconst configured = Array.isArray(input.whitelist_ips) ? input.whitelist_ips.map(String) : [];\nreturn [{ json: { http: 200, body: {\n  generated_at: new Date().toISOString(),\n  summary: { open: open.length, closed: all.length - open.length, by_type }, tickets: all,\n  whitelist: [...configured.map(ip => ({ip, source:'환경설정'})), ...Object.entries(sd.whitelist).map(([ip,v])=>({ip,source:'상황판',...v}))],\n  skipped: sd.skipped.slice(0,10)\n} } }];"
+      },
+      "id": "a1f0c0de-0017-4000-8000-000000000017",
+      "name": "티켓 목록 만들기",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        944
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.http }}"
+        }
+      },
+      "id": "a1f0c0de-0018-4000-8000-000000000018",
+      "name": "응답(티켓 목록)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        672,
+        944
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "nexus-ticket-action",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "a1f0c0de-0019-4000-8000-000000000019",
+      "name": "티켓 처리 요청(POST)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        1248
+      ],
+      "webhookId": "a1f0c0de-0019-4000-8000-0000000000cc",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "AFvgWFphn8WEBgwz",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json || {};\nconst sd = $getWorkflowStaticData('global');\nsd.tickets = sd.tickets || {}; sd.history = sd.history || []; sd.whitelist = sd.whitelist || {}; sd.skipped = sd.skipped || [];\nconst configured = Array.isArray(input.whitelist_ips) ? input.whitelist_ips.map(String) : (typeof input.whitelist_ips === 'string' ? (JSON.parse(input.whitelist_ips) || []).map(String) : []);\nconst b = typeof input.body === 'string' ? (JSON.parse(input.body) || {}) : (input.body || {});\nconst now = new Date().toISOString();\nconst ipOk = ip => /^(?:\\d{1,3}\\.){3}\\d{1,3}$/.test(String(ip || ''));\nconst res = (http, body) => [{ json: { http, body } }];\nconst userOk = u => /^[A-Za-z][A-Za-z0-9._-]{0,49}$/.test(String(u || ''));\nconst findT = id => Object.values(sd.tickets).find(x => x.id === id);\nconst liveEnabled = input.live_enabled === true || Number(input.live_enabled) === 1;\nconst mode = input.response_mode === 'live' && liveEnabled ? 'live' : 'dry-run';\nconst lockMin = Math.min(Math.max(parseInt(input.lock_minutes, 10) || 15, 1), 1440);\nconst LABEL = { applied: '적용', no_change: '변경 없음', 'dry-run': '미실행(dry-run)', error: '오류' };\nconst addRec = (t, rec) => { t.responses = (t.responses || []).concat([rec]).slice(-30); };\nconst parseDbJson = (v, fallback) => {\n  if (Array.isArray(v) || (v && typeof v === 'object')) return v;\n  if (typeof v === 'string') { try { return JSON.parse(v); } catch {} }\n  return fallback;\n};\nconst dbTicketMatch = /^NX-DB-(\\d{6,18})$/.exec(String(b.ticket_id || ''));\nif (dbTicketMatch) {\n  const dbId=Number(input.ticket_db_id||0);\n  if(!dbId)return res(404,{status:'not_found'});\n  const users=parseDbJson(input.ticket_db_users,[]), rules=parseDbJson(input.ticket_db_rules,[]);\n  const responses=parseDbJson(input.ticket_db_responses,[]);\n  const t={id:b.ticket_id,src_ip:String(input.ticket_db_src_ip||''),type:input.ticket_db_type,users,rules,\n    count:Number(input.ticket_db_count||0),status:input.ticket_db_status,first_seen:input.ticket_db_first_seen,\n    last_seen:input.ticket_db_last_seen,latest:parseDbJson(input.ticket_db_latest,{}),responses};\n  const makeAction=(action,resolution=null,note='',response=null,whitelist=false)=>({id:dbId,action,resolution,note,\n    response:response?JSON.stringify(response):null,whitelist,whitelist_ip:t.src_ip,\n    params:[dbId,action,resolution||'',String(note||'').slice(0,500),response?JSON.stringify(response):null]});\n  if (b.action === 'approve_response') {\n    const assessmentId = String(b.assessment_id || '').trim();\n    const planId = String(b.plan_id || (assessmentId + ':' + String(b.ticket_id || ''))).trim();\n    const plan = sd.pendingActions && sd.pendingActions[planId];\n    if (!plan || !assessmentId || plan.assessment_id !== assessmentId || plan.ticket_id !== b.ticket_id)\n      return res(404, { status: 'no_pending_action' });\n    if (plan.response_group === 'session_ai')\n      return res(501, { status: 'not_supported_yet', note: '세션 종료·AI Tool 제한 승인은 다음 단계에서 지원' });\n    if (plan.assessment_status !== 'PENDING' || plan.approval_allowed !== true || plan.auto_allowed !== false ||\n        !['DAYTIME_APPROVAL', 'WEEKEND_APPROVAL'].includes(plan.policy_reason) ||\n        plan.rule_id !== 'R1' || plan.response_group !== 'lock' || plan.plan_id !== planId)\n      return res(409, { status: 'invalid_pending_action' });\n    if (plan.status === 'executing') return res(409, { status: 'approval_in_progress' });\n    if (plan.status !== 'pending' || plan.ticket_key !== String(input.ticket_db_key || '') ||\n        input.ticket_db_status !== 'open' || !rules.includes('R1') || !users.includes(plan.user) ||\n        !userOk(plan.user) || Number(input.ticket_db_id) !== Number(plan.ticket_db_id))\n      return res(409, { status: 'pending_action_stale' });\n    const expectedSql = 'UPDATE users SET locked_until = IF(pinned = 0, DATE_ADD(NOW(), INTERVAL $1 MINUTE), locked_until), session_version = IF(pinned = 1, session_version + 1, session_version) WHERE username = $2';\n    const expectedVerify = \"SELECT 'lock' AS step_key, username, pinned, locked_until, (locked_until IS NOT NULL AND locked_until > NOW()) AS locked, session_version FROM users WHERE username = $1\";\n    if (plan.step !== '계정 잠금(AI-XDR 관제 승인)' || plan.sql !== expectedSql || plan.verify_sql !== expectedVerify ||\n        !Array.isArray(plan.params) || plan.params.length !== 2 || Number(plan.params[0]) !== 15 || plan.params[1] !== plan.user)\n      return res(409, { status: 'invalid_pending_plan' });\n    if (mode !== 'live' || !liveEnabled) {\n      const responseExists = responses.some(r => r && r.plan_id === planId && r.assessment_id === assessmentId);\n      const approvalRecord = {\n        time: now, step: 'AI-XDR 승인', user: plan.user, mode: 'dry-run', status: 'dry-run',\n        label: '승인 기록(dry-run)', by: '상황판(AI-XDR 승인)',\n        detail: '승인만 기록; 실제 계정 잠금 미실행', assessment_id: assessmentId,\n        ticket_id: plan.ticket_id, plan_id: planId\n      };\n      return [{json: {\n        xdr_decision_request: { assessment_id: assessmentId, status: 'APPROVED', approval_ref: planId },\n        ticket_id: plan.ticket_id, ticket_response_exists: responseExists, pending_plan_id: planId,\n        db_ticket_action: responseExists ? undefined : makeAction('record_response', null, '', approvalRecord)\n      }}];\n    }\n    plan.status = 'executing';\n    plan.last_attempt_at = now;\n    return [{ json: { http: 200, body: null, db: {\n      ticket_id: plan.ticket_id, ticket_db_id: plan.ticket_db_id, ticket_key: plan.ticket_key,\n      pending_plan_id: planId, assessment_id: plan.assessment_id, rule_id: plan.rule_id,\n      user: plan.user, kind: 'lock', mode: 'live', by: '상황판(AI-XDR 승인)',\n      step: plan.step, undo: plan.undo, execute: true, sql: plan.sql, params: plan.params,\n      verify_sql: plan.verify_sql\n    } } }];\n  }\n  if(b.action==='close'||b.action==='false_positive'){\n    if(t.status==='closed')return res(409,{status:'already_closed'});\n    return [{json:{http:200,body:null,db_ticket_action:makeAction(b.action,b.action==='false_positive'?'오탐':'조치 완료',b.note||'',null,b.action==='false_positive'&&b.whitelist===true)}}];\n  }\n  if(b.action==='release'||b.action==='lock'){\n    const selected=String(b.user||(users.length===1?users[0]:'')).trim();\n    if(!userOk(selected))return res(400,{status:'bad_user'});\n    if(!users.includes(selected))return res(400,{status:'user_not_in_ticket'});\n    const rel=b.action==='release';\n    const rec={time:now,step:rel?'계정 잠금 해제':'계정 잠금(사람 승인)',user:selected,mode:'dry-run',status:'dry-run',\n      label:LABEL['dry-run'],by:'상황판',detail:'dry-run(DB를 바꾸지 않음)',undo:rel?'locked_until = NULL (잠금 해제)':'상황판의 \"잠금(승인)\"으로 다시 잠금'};\n    return [{json:{http:200,body:{status:'ok',result:rec,ticket:{...t,responses:[...responses,rec].slice(-30)}},\n      db_ticket_action:makeAction('record_response',null,'',rec)}}];\n  }\n  if(b.action==='request_release'){\n    const selected=String(b.user||'').trim();if(!userOk(selected))return res(400,{status:'bad_user'});\n    sd.seq=(sd.seq||0)+1;const req={id:'NX-'+String(sd.seq).padStart(4,'0'),src_ip:t.src_ip,type:'오탐·해제 요청',rules:[],\n      users:[selected],user:selected,count:1,first_seen:now,last_seen:now,status:'open',linked_ticket:t.id,reason:String(b.reason||'').slice(0,300)};\n    sd.tickets['request:'+req.id]=req;return res(200,{status:'ok',ticket:req});\n  }\n}\nif (b.action === 'close' || b.action === 'false_positive') {\n  const t = Object.values(sd.tickets).find(x => x.id === b.ticket_id);\n  if (!t) return res(404, { status: 'not_found' });\n  if (t.status === 'closed') return res(409, { status: 'already_closed' });\n  t.status = 'closed'; t.resolution = b.action === 'false_positive' ? '오탐' : '조치 완료'; t.closed_at = now;\n  t.note = String(b.note || '').slice(0, 500);\n  if (b.action === 'false_positive' && b.whitelist === true && ipOk(t.src_ip)) sd.whitelist[t.src_ip] = { added_at: now, reason: '오탐 ' + t.id };\n  return res(200, { status: 'ok', ticket: t });\n}\nif (b.action === 'request_release') {\n  const user = String(b.user || '').trim();\n  if (!userOk(user)) return res(400, { status: 'bad_user' });\n  const linked = b.ticket_id ? findT(b.ticket_id) : null;\n  if (b.ticket_id && !linked) return res(404, { status: 'not_found' });\n  sd.seq = (sd.seq || 0) + 1;\n  const t = { id: 'NX-' + String(sd.seq).padStart(4, '0'), src_ip: linked ? linked.src_ip : '', type: '오탐·해제 요청',\n    rules: [], users: [user], user, count: 1, first_seen: now, last_seen: now, status: 'open', linked_ticket: linked ? linked.id : null, reason: String(b.reason || '').slice(0, 300) };\n  sd.tickets['request:' + t.id] = t;\n  return res(200, { status: 'ok', ticket: t });\n}\nif (b.action === 'release' || b.action === 'lock') {\n  const t = findT(b.ticket_id);\n  if (!t) return res(404, { status: 'not_found' });\n  const user = String(b.user || t.user || (t.users.length === 1 ? t.users[0] : '')).trim();\n  if (!userOk(user)) return res(400, { status: 'bad_user', hint: 'user 를 지정하세요' });\n  if (![...(t.users || []), t.user].includes(user)) return res(400, { status: 'user_not_in_ticket' });\n  const rel = b.action === 'release';\n  const ctx = { ticket_id: t.id, user, kind: b.action, mode, by: '상황판',\n    step: rel ? '계정 잠금 해제' : '계정 잠금(사람 승인)', undo: rel ? '상황판의 \"잠금(승인)\"으로 다시 잠금' : 'locked_until = NULL (잠금 해제)' };\n  if (mode !== 'live') {\n    const rec = { time: now, step: ctx.step, user, mode, status: 'dry-run', label: LABEL['dry-run'], by: ctx.by, detail: 'dry-run(DB를 바꾸지 않음)', undo: ctx.undo };\n    addRec(t, rec);\n    return res(200, { status: 'ok', result: rec, ticket: t });\n  }\n  const sql = rel ? 'UPDATE users SET locked_until = NULL WHERE username = $1'\n    : 'UPDATE users SET locked_until = DATE_ADD(NOW(), INTERVAL $1 MINUTE) WHERE username = $2';\n  const verify = \"SELECT '\" + (rel ? 'release' : 'lock') + \"' AS step_key, username, pinned, locked_until, (locked_until IS NOT NULL AND locked_until > NOW()) AS locked, session_version FROM users WHERE username = $1\";\n  return [{ json: { http: 200, body: null, db: { ...ctx, execute: input.live_enabled === true, sql, params: rel ? [user] : [lockMin, user], verify_sql: verify } } }];\n}\nif (b.action === 'whitelist_add') {\n  if (!ipOk(b.ip)) return res(400, { status: 'bad_ip' });\n  sd.whitelist[b.ip] = { added_at: now, reason: String(b.note || '수동 추가').slice(0, 200) };\n  return res(200, { status: 'ok', ip: b.ip });\n}\nif (b.action === 'whitelist_remove') {\n  if (!sd.whitelist[b.ip] && !configured.includes(String(b.ip || ''))) return res(404, { status: 'not_found' });\n  delete sd.whitelist[b.ip];\n  return res(200, { status: 'ok', ip: b.ip, note: configured.includes(String(b.ip || '')) ? '환경설정 whitelist는 설정 노드에서 관리' : undefined });\n}\nreturn res(400, { status: 'bad_action', allowed: ['close', 'false_positive', 'release', 'lock', 'request_release', 'whitelist_add', 'whitelist_remove', 'approve_response'] });"
+      },
+      "id": "a1f0c0de-0020-4000-8000-000000000020",
+      "name": "티켓 처리·화이트리스트",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        1248
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.body) }}",
+        "options": {
+          "responseCode": "={{ $json.http }}"
+        }
+      },
+      "id": "a1f0c0de-0021-4000-8000-000000000021",
+      "name": "응답(처리 결과)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1568,
+        1248
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json;\nconst mode = d.response_mode === 'live' ? 'live' : 'dry-run';\nconst live = mode === 'live' && d.live_enabled === true && d.auto_response_allowed === true;\nconst lockMin = Math.min(Math.max(parseInt(d.lock_minutes, 10) || 15, 1), 1440);\nconst user = String(d.user || '').trim();\nconst okUser = /^[A-Za-z][A-Za-z0-9._-]{0,49}$/.test(user);\nconst base = { ticket_id: d.ticket_id, ticket_key: d.ticket_key, rule_id: d.rule_id, user, mode,\n  live_enabled: d.live_enabled === true, discord_enabled: d.discord_enabled };\nconst steps = [];\nconst VERIFY = k => \"SELECT '\" + k + \"' AS step_key, username, pinned, locked_until, (locked_until IS NOT NULL AND locked_until > NOW()) AS locked, session_version FROM users WHERE username = $1\";\nif (d.response_group === 'lock' && d.auto_response_allowed === true) {\n  steps.push({ step: '계정 잠금', sql: 'UPDATE users SET locked_until = IF(pinned = 0, DATE_ADD(NOW(), INTERVAL $1 MINUTE), locked_until), session_version = IF(pinned = 1, session_version + 1, session_version) WHERE username = $2',\n    params: [lockMin, user], verify_sql: VERIFY('lock'), undo: 'UPDATE users SET locked_until = NULL WHERE username = ?', note: lockMin + '분' });\n}\nif (d.response_group === 'session_ai' && d.auto_response_allowed === true && d.decision === 'DENY') {\n  steps.push({ step: '세션 종료(강제 로그아웃)', sql: 'UPDATE users SET session_version = session_version + 1 WHERE username = $1',\n    params: [user], verify_sql: VERIFY('logout'), undo: '되돌릴 필요 없음(다시 로그인하면 됨)' });\n  steps.push({ step: 'AI Tool 제한', pending: 'Tool Gateway 미구현: 실제 제한은 pending' });\n}\nif (!steps.length) steps.push({ step: '자동 대응 없음', skip_reason: d.rule_id === 'R1' ? 'R1은 기존 account_locked 결과 기록 또는 account_compromise_suspected 경보만 수행' : 'decision/action_level/metadata 확인 또는 구현 준비 전에는 자동 DB 조치 금지' });\nreturn steps.map(s => ({ json: { ...base, ...s,\n  execute: live && okUser && !!s.sql,\n  skip_reason: s.skip_reason || (!s.sql ? (s.pending || s.skip_reason) : (!okUser ? (user ? '계정 이름 형식 오류' : '대상 계정 없음') : (!live ? 'dry-run 또는 live_enabled=false (DB를 바꾸지 않음)' : ''))) } }));"
+      },
+      "id": "a1f0c0de-0022-4000-8000-000000000022",
+      "name": "대응 준비(DB 조치)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2016,
+        336
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cx23",
+              "leftValue": "={{ $json.execute }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1f0c0de-0023-4000-8000-000000000023",
+      "name": "DB 조치 실행?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        2240,
+        336
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.sql }}",
+        "options": {
+          "queryReplacement": "={{ $json.params.join(',') }}"
+        }
+      },
+      "id": "a1f0c0de-0024-4000-8000-000000000024",
+      "name": "DB 조치 실행",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        2464,
+        272
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "9ixRhSMzMMHOXk92",
+          "name": "MySQL account"
+        }
+      },
+      "disabled": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const prep = $('대응 준비(DB 조치)').all();\nconst sd = $getWorkflowStaticData('global');\nconst LABEL = { applied: '적용', partial: '일부 적용(세션 종료만)', no_change: '변경 없음', 'dry-run': '미실행(dry-run)', skipped: '건너뜀', error: '오류', pending: 'AI 연동 후 구현' };\nlet updErr = null;\ntry { updErr = $('DB 조치 실행').all().find(u => u.json && u.json.error) || null; } catch (e) {}\nconst execCtx = (prep.find(p => p.json.execute) || {}).json;\nconst out = [];\nfor (const it of $input.all()) {\n  const j = it.json;\n  let ctx, status, detail = '', note;\n  if (j.step) {                                   // DB를 거치지 않은 항목(dry-run·건너뜀·보류)\n    ctx = j; detail = j.skip_reason || '';\n    status = j.pending ? 'pending' : (String(j.skip_reason).startsWith('dry-run') ? 'dry-run' : 'skipped');\n  } else {                                        // 조치 후 확인 조회 결과\n    ctx = execCtx || {};\n    if (updErr || j.error) { status = 'error'; detail = String((updErr ? updErr.json.message : j.message) || '').slice(0, 200); }\n    else if (!j.username) { status = 'no_change'; detail = '대상 계정을 찾지 못함'; }\n    else if (Number(j.pinned) === 1 && j.step_key === 'lock') { status = 'partial'; detail = '고정 계정: 잠금 없이 세션 종료만 실행. 잠금은 사람이 승인'; note = '세션 버전 ' + j.session_version; }\n    else if (j.step_key === 'lock' && !Number(j.locked)) { status = 'error'; detail = '조치 후에도 잠금 상태가 아님'; }\n    else { status = 'applied'; note = j.step_key === 'lock' ? ('잠금 해제 예정 ' + j.locked_until) : ('세션 버전 ' + j.session_version); }\n  }\n  const rec = { time: new Date().toISOString(), step: ctx.step, user: ctx.user, mode: ctx.mode, status, label: LABEL[status] };\n  if (detail) rec.detail = detail;\n  if (note || ctx.note) rec.note = note || ctx.note;\n  if (ctx.undo) rec.undo = ctx.undo;\n  const t = sd.tickets && sd.tickets[ctx.ticket_key];\n  if (t) { t.responses = (t.responses || []).concat([rec]).slice(-30); }\n  out.push({ json: { ...rec, ticket_id: ctx.ticket_id, rule_id: ctx.rule_id,\n    discord_enabled: !!ctx.discord_enabled && ctx.live_enabled === true && ['applied', 'partial', 'no_change', 'error'].includes(status),\n    message: `[${ctx.ticket_id}] 대응 결과: ${ctx.step} → ${LABEL[status]} | 대상 ${ctx.user || '-'}` + (rec.note ? ' | ' + rec.note : '') + (detail ? ' | ' + detail : '') } });\n}\nreturn out;\n"
+      },
+      "id": "a1f0c0de-0025-4000-8000-000000000025",
+      "name": "대응 결과 기록",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2912,
+        336
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cx26",
+              "leftValue": "={{ $json.discord_enabled }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1f0c0de-0026-4000-8000-000000000026",
+      "name": "결과를 Discord로?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        3136,
+        336
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "webhook",
+        "content": "={{ $json.message }}",
+        "options": {}
+      },
+      "id": "a1f0c0de-0027-4000-8000-000000000027",
+      "name": "대응 결과 알림",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [
+        3360,
+        336
+      ],
+      "webhookId": "e436b7d8-568a-4c6e-b84d-170722bd9751",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "discordWebhookApi": {
+          "id": "6CL2cQrlmyd7kHx2",
+          "name": "Discord Webhook account"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $('대응 준비(DB 조치)').all().find(p => p.json.execute).json.verify_sql }}",
+        "options": {
+          "queryReplacement": "={{ $('대응 준비(DB 조치)').all().find(p => p.json.execute).json.user }}"
+        }
+      },
+      "id": "a1f0c0de-0028-4000-8000-000000000028",
+      "name": "조치 확인 조회",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        2688,
+        272
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "mySql": {
+          "id": "9ixRhSMzMMHOXk92",
+          "name": "MySQL account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cx30",
+              "leftValue": "={{ !!($json.db && $json.db.execute) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1f0c0de-0030-4000-8000-000000000030",
+      "name": "계정 조치 실행?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        672,
+        1248
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $json.db.sql }}",
+        "options": {
+          "queryReplacement": "={{ $json.db.params.join(',') }}"
+        }
+      },
+      "id": "a1f0c0de-0031-4000-8000-000000000031",
+      "name": "계정 조치 실행",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        896,
+        1168
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "9ixRhSMzMMHOXk92",
+          "name": "MySQL account"
+        }
+      },
+      "disabled": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "{{ $('티켓 처리·화이트리스트').first().json.db.verify_sql }}",
+        "options": {
+          "queryReplacement": "={{ $('티켓 처리·화이트리스트').first().json.db.user }}"
+        }
+      },
+      "id": "a1f0c0de-0032-4000-8000-000000000032",
+      "name": "계정 조치 확인",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.4,
+      "position": [
+        1120,
+        1168
+      ],
+      "alwaysOutputData": true,
+      "credentials": {
+        "mySql": {
+          "id": "9ixRhSMzMMHOXk92",
+          "name": "MySQL account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $('티켓 처리·화이트리스트').first().json.db;\nconst sd = $getWorkflowStaticData('global');\nconst LABEL = { applied: '적용', no_change: '변경 없음', error: '오류' };\nlet updErr = null;\ntry { updErr = $('계정 조치 실행').all().find(u => u.json && u.json.error) || null; } catch (e) {}\nconst j = $input.first().json;\nlet status, detail = '', note;\nif (updErr || j.error) { status = 'error'; detail = String((updErr ? updErr.json.message : j.message) || '').slice(0, 200); }\nelse if (!j.username) { status = 'no_change'; detail = '대상 계정을 찾지 못함'; }\nelse if (ctx.kind === 'release') {\n  if (Number(j.locked)) { status = 'error'; detail = '조치 후에도 잠겨 있음'; } else { status = 'applied'; note = '잠금 해제됨'; }\n} else {\n  if (!Number(j.locked)) { status = 'error'; detail = '조치 후에도 잠금 상태가 아님'; } else { status = 'applied'; note = '잠금 해제 예정 ' + j.locked_until; }\n}\nconst now = new Date().toISOString();\nconst rec = { time: now, step: ctx.step, user: ctx.user, mode: ctx.mode, status, label: LABEL[status], by: ctx.by, undo: ctx.undo };\nif (detail) rec.detail = detail;\nif (note) rec.note = note;\nif (ctx.pending_plan_id) {\n  const plan = sd.pendingActions && sd.pendingActions[ctx.pending_plan_id];\n  if (plan) {\n    if (status === 'applied') delete sd.pendingActions[ctx.pending_plan_id];\n    else { plan.status = 'pending'; plan.last_attempt_result = status; }\n  }\n}\nconst dbTicketAction = ctx.pending_plan_id && status === 'applied' && Number(ctx.ticket_db_id) > 0 ? {\n  id: Number(ctx.ticket_db_id), action: 'record_response', resolution: null, note: '',\n  response: JSON.stringify(rec), whitelist: false,\n  params: [Number(ctx.ticket_db_id), 'record_response', '', '', JSON.stringify(rec)]\n} : undefined;\nconst all = Object.values(sd.tickets || {});\nconst t = all.find(x => x.id === ctx.ticket_id);\nconst push = x => { if (x) x.responses = (x.responses || []).concat([rec]).slice(-30); };\npush(t);\nif (t && t.linked_ticket) push(all.find(x => x.id === t.linked_ticket));\nif (t && t.type === '오탐·해제 요청' && ctx.kind === 'release' && status === 'applied' && t.status === 'open') {\n  t.status = 'closed'; t.resolution = '해제 승인'; t.closed_at = now;\n}\nreturn [{ json: { http: status === 'error' ? 502 : 200, body: { status: status === 'error' ? 'error' : 'ok', result: rec, ticket: t }, ...(dbTicketAction ? { db_ticket_action: dbTicketAction } : {}) } }];\n"
+      },
+      "id": "a1f0c0de-0033-4000-8000-000000000033",
+      "name": "계정 조치 결과·응답",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        1168
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "setting-mode",
+              "name": "response_mode",
+              "value": "dry-run",
+              "type": "string"
+            },
+            {
+              "id": "setting-live",
+              "name": "live_enabled",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "id": "setting-lock",
+              "name": "lock_minutes",
+              "value": 15,
+              "type": "number"
+            },
+            {
+              "id": "setting-whitelist",
+              "name": "whitelist_ips",
+              "value": [],
+              "type": "array"
+            },
+            {
+              "id": "5d38f072-9a52-48c1-b0da-5c77437c9821",
+              "name": "discord_enabled",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "id": "3baa1c67-b9cb-49bd-abf0-c26d30839f5f",
+              "name": "discord_test_alert_id",
+              "value": "",
+              "type": "string"
+            },
+            {
+              "id": "619dc8eb-281a-48fd-97e7-984dd264db0e",
+              "name": "ip_block_enabled",
+              "value": false,
+              "type": "boolean"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "include": "except",
+        "excludeFields": "headers",
+        "options": {}
+      },
+      "id": "a1f0c0de-0034-4000-8000-000000000034",
+      "name": "NEXUS 안전 설정(수신)",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        448,
+        224
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "dedup-or-fallback",
+              "leftValue": "={{ !!$json.skip_side_effects }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1f0c0de-0035-4000-8000-000000000035",
+      "name": "중복·비지원 이벤트 차단",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        896,
+        128
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "setting-mode",
+              "name": "response_mode",
+              "value": "dry-run",
+              "type": "string"
+            },
+            {
+              "id": "setting-live",
+              "name": "live_enabled",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "id": "setting-lock",
+              "name": "lock_minutes",
+              "value": 15,
+              "type": "number"
+            },
+            {
+              "id": "setting-whitelist",
+              "name": "whitelist_ips",
+              "value": [],
+              "type": "array"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "include": "except",
+        "excludeFields": "headers",
+        "options": {}
+      },
+      "id": "a1f0c0de-0036-4000-8000-000000000036",
+      "name": "NEXUS 안전 설정(조회)",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        224,
+        944
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "setting-mode",
+              "name": "response_mode",
+              "value": "dry-run",
+              "type": "string"
+            },
+            {
+              "id": "setting-live",
+              "name": "live_enabled",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "id": "setting-lock",
+              "name": "lock_minutes",
+              "value": 15,
+              "type": "number"
+            },
+            {
+              "id": "setting-whitelist",
+              "name": "whitelist_ips",
+              "value": [],
+              "type": "array"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "include": "except",
+        "excludeFields": "headers",
+        "options": {}
+      },
+      "id": "a1f0c0de-0037-4000-8000-000000000037",
+      "name": "NEXUS 안전 설정(티켓 처리)",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        224,
+        1248
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({status: \"accepted\", rule_id: $json.rule_id, alert_id: $json.graylog_event_id}) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "a1f0c0de-0038-4000-8000-000000000038",
+      "name": "응답 200(티켓 기록 후 접수)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1568,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "whitelisted-alert",
+              "leftValue": "={{ !!$json.whitelisted }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1f0c0de-0039-4000-8000-000000000039",
+      "name": "화이트리스트 제외?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1344,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SET @nexus_param_1=$1,@nexus_param_2=$2,@nexus_param_3=$3,@nexus_param_4=$4,@nexus_param_5=$5,@nexus_param_6=$6,@nexus_param_7=$7,@nexus_param_8=$8,@nexus_param_9=$9,@nexus_param_10=$10,@nexus_param_11=$11,@nexus_param_12=$12; SET @nexus_new_alert = 0; SET @nexus_ticket_time = COALESCE(STR_TO_DATE(LEFT(REPLACE(REPLACE(REPLACE(@nexus_param_8,'T',' '),'Z',''),'+00:00',''),26), '%Y-%m-%d %H:%i:%s.%f'), UTC_TIMESTAMP(6)); INSERT IGNORE INTO security_incident_alerts (alert_id,receipt_id,ticket_id,rule_id,event_type,user_name,src_ip,event_count,occurred_at,event_payload) VALUES (@nexus_param_1,@nexus_param_2,NULL,@nexus_param_3,@nexus_param_4,@nexus_param_5,@nexus_param_6,@nexus_param_7,@nexus_ticket_time,CAST(@nexus_param_9 AS JSON)); SET @nexus_new_alert = ROW_COUNT(); INSERT INTO security_incident_tickets (ticket_key,status,src_ip,ticket_type,type_rank,event_count,rule_ids,user_names,first_seen,last_seen,latest_event,responses) SELECT @nexus_param_10,'open',@nexus_param_6,@nexus_param_11,@nexus_param_12,@nexus_param_7,JSON_ARRAY(@nexus_param_3),IF(@nexus_param_5='',JSON_ARRAY(),JSON_ARRAY(@nexus_param_5)), @nexus_ticket_time,@nexus_ticket_time,CAST(@nexus_param_9 AS JSON),JSON_ARRAY() FROM DUAL WHERE @nexus_new_alert=1 ON DUPLICATE KEY UPDATE ticket_type=IF(VALUES(type_rank)>type_rank,VALUES(ticket_type),ticket_type), type_rank=GREATEST(type_rank,VALUES(type_rank)), event_count=event_count+VALUES(event_count), rule_ids=IF(JSON_CONTAINS(rule_ids,JSON_QUOTE(@nexus_param_3)),rule_ids,JSON_ARRAY_APPEND(rule_ids,'$',@nexus_param_3)), user_names=IF(@nexus_param_5='',user_names,IF(JSON_CONTAINS(user_names,JSON_QUOTE(@nexus_param_5)),user_names,JSON_ARRAY_APPEND(user_names,'$',@nexus_param_5))), last_seen=GREATEST(last_seen,VALUES(last_seen)), latest_event=VALUES(latest_event); SET @nexus_ticket_id = IF(@nexus_new_alert=1, (SELECT id FROM security_incident_tickets WHERE active_ticket_key=CONVERT(@nexus_param_10 USING utf8mb4) COLLATE utf8mb4_unicode_ci LIMIT 1),NULL); UPDATE security_incident_alerts SET ticket_id=@nexus_ticket_id WHERE alert_id=CONVERT(@nexus_param_1 USING utf8mb4) COLLATE utf8mb4_unicode_ci AND @nexus_new_alert=1; SELECT (a.receipt_id=CONVERT(@nexus_param_2 USING utf8mb4) COLLATE utf8mb4_unicode_ci) AS ticket_is_new,(a.receipt_id<>CONVERT(@nexus_param_2 USING utf8mb4) COLLATE utf8mb4_unicode_ci) AS ticket_duplicate, t.id AS ticket_db_id,CONCAT('NX-DB-',LPAD(t.id,6,'0')) AS ticket_id,t.ticket_type, t.event_count AS ticket_event_total,t.rule_ids AS ticket_rules,t.user_names AS ticket_users, t.status,t.first_seen,t.last_seen,a.alert_id FROM security_incident_alerts a LEFT JOIN security_incident_tickets t ON t.id=a.ticket_id WHERE a.alert_id=CONVERT(@nexus_param_1 USING utf8mb4) COLLATE utf8mb4_unicode_ci;",
+        "options": {
+          "queryBatching": "transaction",
+          "queryReplacement": "={{ $json.ticket_record.params }}"
+        }
+      },
+      "id": "3006fa83-a8f8-56c2-931f-d5415d8ff889",
+      "name": "티켓 DB 원자 기록",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        2192,
+        528
+      ],
+      "retryOnFail": true,
+      "waitBetweenTries": 500,
+      "credentials": {
+        "mySql": {
+          "id": "2f8096cce6024737",
+          "name": "NEXUS Ticket DB local"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $('티켓 기록(출발지별)').first().json;\nconst row = $input.first().json || {};\nif (!row.ticket_db_id) throw new Error('persistent ticket record was not returned');\nconst parse = (v, fallback) => {\n  if (Array.isArray(v) || (v && typeof v === 'object')) return v;\n  if (typeof v === 'string') { try { return JSON.parse(v); } catch {} }\n  return fallback;\n};\nconst rules = parse(row.ticket_rules, []);\nconst users = parse(row.ticket_users, []);\nconst ticketId = String(row.ticket_id || 'NX-DB-' + String(row.ticket_db_id).padStart(6, '0'));\nconst duplicate = row.ticket_duplicate === true || Number(row.ticket_duplicate) === 1;\nconst isNew = !duplicate && (row.ticket_is_new === true || Number(row.ticket_is_new) === 1);\n\nconst ruleId = String(d.rule_id || d.rule?.id || '').trim();\nconst displayName = String(d.rule?.display_name || '')\n  .replace(/^\\s*(?:\\[(?:NEXUS|R(?:[1-9]|1[0-2]))\\]\\s*)+/i, '')\n  .trim();\nconst heading = ['🚨', ruleId ? '[' + ruleId + ']' : '', displayName].filter(Boolean).join(' ');\nconst lines = [heading || '🚨 NEXUS 탐지'];\nconst addField = (label, value, transform) => {\n  if (value === undefined || value === null) return;\n  const text = String(value).trim();\n  if (!text) return;\n  lines.push(label + ': ' + (transform ? transform(text) : text));\n};\naddField('📌 사건 ID', ticketId);\naddField('👤 계정', d.event?.user || d.user);\naddField('🌐 출발지 IP', d.event?.src_ip || d.src_ip);\naddField('🧩 이벤트', d.event?.event_type);\naddField('🛠 Tool', d.event?.tool_name || d.tool_name);\naddField('📍 경로', d.event?.path);\naddField('⚖ 판정', d.event?.decision || d.decision, value => value.toUpperCase());\naddField('🔥 심각도', d.severity || d.rule?.severity || d.event?.severity, value => value.toUpperCase());\n\nconst timestamp = d.alert?.timestamp || d.last_seen;\nif (timestamp) {\n  const parsed = new Date(timestamp);\n  if (Number.isFinite(parsed.getTime())) {\n    const parts = new Intl.DateTimeFormat('en-CA', {\n      timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit',\n      hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'\n    }).formatToParts(parsed);\n    const part = type => parts.find(item => item.type === type)?.value || '';\n    const kst = part('year') + '-' + part('month') + '-' + part('day') + ' ' +\n      part('hour') + ':' + part('minute') + ':' + part('second');\n    if (kst.trim()) lines.push('🕒 시각: ' + kst + ' KST');\n  }\n}\n\nlines.push('', '🛡 대응');\n\nlines.push('• 티켓: ' + (isNew ? '신규' : '업데이트'));\nfor (const action of (Array.isArray(d.actions) ? d.actions : [])) {\n  const text = String(action || '').trim();\n  if (!text || text === '알림' || text === '티켓') continue;\n  lines.push('• ' + text);\n}\n\nconst message = lines.join('\\n');\nreturn [{ json: { ...d, ticket_id: ticketId, ticket_duplicate: duplicate,\n  ticket_is_new: isNew, ticket_type: row.ticket_type || d.ticket_type,\n  ticket_rules: rules, ticket_users: users,\n  ticket_event_total: Number(row.ticket_event_total || 0),\n  skip_side_effects: !!d.skip_side_effects || duplicate,\n  message\n} }];"
+      },
+      "id": "a44fd675-3dca-5a62-87d6-03a14d559dde",
+      "name": "티켓 DB 결과 병합",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        528
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "db-ticket-duplicate",
+              "leftValue": "={{ !!$json.ticket_duplicate }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "25ce61aa-2a4e-5c0c-a0f0-3d655f262b48",
+      "name": "티켓 DB 중복인가?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2624,
+        528
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT COALESCE(JSON_ARRAYAGG(JSON_OBJECT(\n  'id',id,'ticket_key',ticket_key,'status',status,'src_ip',src_ip,'ticket_type',ticket_type,\n  'type_rank',type_rank,'event_count',event_count,'rule_ids',rule_ids,'user_names',user_names,\n  'first_seen',DATE_FORMAT(first_seen,'%Y-%m-%dT%H:%i:%s.%fZ'),\n  'last_seen',DATE_FORMAT(last_seen,'%Y-%m-%dT%H:%i:%s.%fZ'),\n  'latest_event',latest_event,'resolution',resolution,'closed_at',closed_at,'note',note,'responses',responses\n)),JSON_ARRAY()) AS ticket_rows\nFROM (SELECT * FROM security_incident_tickets ORDER BY last_seen DESC LIMIT 500) AS tickets",
+        "options": {
+          "queryBatching": "single",
+          "queryReplacement": "={{ [] }}"
+        }
+      },
+      "id": "4b0f941b-ed22-5e32-8a33-968c399db5a8",
+      "name": "상황판 티켓 DB 조회",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        1024,
+        1088
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "2f8096cce6024737",
+          "name": "NEXUS Ticket DB local"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT t.id AS ticket_db_id, t.ticket_key AS ticket_db_key, t.status AS ticket_db_status, t.src_ip AS ticket_db_src_ip,\n  t.user_names AS ticket_db_users, t.ticket_type AS ticket_db_type, t.event_count AS ticket_db_count,\n  t.rule_ids AS ticket_db_rules, t.first_seen AS ticket_db_first_seen, t.last_seen AS ticket_db_last_seen,\n  t.latest_event AS ticket_db_latest, t.responses AS ticket_db_responses,\n  CAST($1 AS JSON) AS body, $2 AS response_mode, CAST($3 AS UNSIGNED) AS live_enabled,\n  CAST($4 AS UNSIGNED) AS lock_minutes, CAST($5 AS JSON) AS whitelist_ips\nFROM (SELECT 1) AS request\nLEFT JOIN security_incident_tickets t\n  ON CONCAT('NX-DB-', LPAD(t.id, 6, '0')) = JSON_UNQUOTE(JSON_EXTRACT(CAST($6 AS JSON), '$.ticket_id'))",
+        "options": {
+          "queryBatching": "single",
+          "queryReplacement": "={{ [JSON.stringify($json.body || {}), $json.response_mode || 'dry-run', $json.live_enabled === true ? 1 : 0, Number($json.lock_minutes) || 15, JSON.stringify(Array.isArray($json.whitelist_ips) ? $json.whitelist_ips : []), JSON.stringify($json.body || {})] }}"
+        }
+      },
+      "id": "89d742fb-ff8c-52be-9e55-1cfba820a6e4",
+      "name": "DB 티켓 대상 조회",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        1024,
+        1280
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "2f8096cce6024737",
+          "name": "NEXUS Ticket DB local"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "db-ticket-action",
+              "leftValue": "={{ !!$json.db_ticket_action }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "9520c7cc-8efd-5609-ab49-b4c679e0a26c",
+      "name": "DB 티켓 처리인가?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1472,
+        1280
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE security_incident_tickets SET resolution=IF($1 IN ('close','false_positive') AND status='open',$2,resolution), closed_at=IF($3 IN ('close','false_positive') AND status='open',UTC_TIMESTAMP(6),closed_at), note=IF($4 IN ('close','false_positive') AND status='open',$5,note), responses=IF($6 IS NULL,COALESCE(responses,JSON_ARRAY()),JSON_ARRAY_APPEND(IF(JSON_LENGTH(COALESCE(responses,JSON_ARRAY()))>=30,JSON_REMOVE(COALESCE(responses,JSON_ARRAY()),'$[0]'),COALESCE(responses,JSON_ARRAY())),'$',CAST($7 AS JSON))), status=IF($8 IN ('close','false_positive') AND status='open','closed',status) WHERE id=$9 AND ($10 NOT IN ('close','false_positive') OR status='open'); SET @nexus_ticket_changed=ROW_COUNT(); SELECT @nexus_ticket_changed AS changed,t.id,t.ticket_key,t.status,t.src_ip,t.ticket_type,t.event_count,t.rule_ids,t.user_names,t.first_seen,t.last_seen,t.latest_event,t.resolution,t.closed_at,t.note,t.responses FROM (SELECT 1) AS request LEFT JOIN security_incident_tickets t ON t.id=$11;",
+        "options": {
+          "queryBatching": "transaction",
+          "queryReplacement": "={{ [$json.db_ticket_action.params[1], $json.db_ticket_action.params[2], $json.db_ticket_action.params[1], $json.db_ticket_action.params[1], $json.db_ticket_action.params[3], $json.db_ticket_action.params[4], $json.db_ticket_action.params[4], $json.db_ticket_action.params[1], $json.db_ticket_action.params[0], $json.db_ticket_action.params[1], $json.db_ticket_action.params[0]] }}"
+        }
+      },
+      "id": "df6a7ff1-c4fc-5bd4-8cbc-2cd41d2f0bbf",
+      "name": "DB 티켓 상태 반영",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        1680,
+        1376
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "2f8096cce6024737",
+          "name": "NEXUS Ticket DB local"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const plan = $('티켓 처리·화이트리스트').first().json || {};\nconst row = $input.first().json || {};\nconst action = plan.db_ticket_action || {};\nif (!row.id) return [{json:{http:404,body:{status:'not_found'}}}];\nif ((action.action==='close'||action.action==='false_positive') && Number(row.changed||0)===0)\n  return [{json:{http:409,body:{status:row.status==='closed'?'already_closed':'conflict'}}}];\nconst parse=(v,fallback)=>{if(Array.isArray(v)||(v&&typeof v==='object'))return v;if(typeof v==='string'){try{return JSON.parse(v)}catch{}}return fallback};\nconst ticket={id:`NX-DB-${String(row.id).padStart(6,'0')}`,ticket_key:row.ticket_key,src_ip:row.src_ip||'',type:row.ticket_type,\n  rules:parse(row.rule_ids,[]),users:parse(row.user_names,[]),count:Number(row.event_count||0),first_seen:row.first_seen,last_seen:row.last_seen,\n  latest:parse(row.latest_event,{}),status:row.status,resolution:row.resolution||undefined,closed_at:row.closed_at||undefined,\n  note:row.note||undefined,responses:parse(row.responses,[])};\nif(action.whitelist && ticket.src_ip && /^(?:\\d{1,3}\\.){3}\\d{1,3}$/.test(ticket.src_ip)){\n  const sd=$getWorkflowStaticData('global');sd.whitelist=sd.whitelist||{};\n  sd.whitelist[ticket.src_ip]={added_at:new Date().toISOString(),reason:'오탐 '+ticket.id};\n}\nif (action.action === 'record_response' && action.response) {\n  const rec = parse(action.response, {});\n  if (rec.plan_id && rec.assessment_id) {\n    const persisted = ticket.responses.some(r => r && r.plan_id === rec.plan_id && r.assessment_id === rec.assessment_id);\n    if (!persisted) return [{json:{http:502,body:{status:'response_not_persisted'}}}];\n    const sd = $getWorkflowStaticData('global');\n    const pending = sd.pendingActions && sd.pendingActions[rec.plan_id];\n    if (pending && pending.assessment_id === rec.assessment_id && pending.ticket_id === rec.ticket_id)\n      delete sd.pendingActions[rec.plan_id];\n  }\n}\nreturn [{json:{http:200,body:{status:'ok',ticket}}}];"
+      },
+      "id": "34c4a2e9-61be-5e1e-aab9-01117fbabde7",
+      "name": "DB 티켓 처리 결과",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1904,
+        1376
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT IGNORE INTO security_discord_rate_limit(id,next_allowed_at) VALUES (1,UTC_TIMESTAMP(6)); UPDATE security_discord_rate_limit SET next_allowed_at=GREATEST(next_allowed_at,UTC_TIMESTAMP(6))+INTERVAL 1 SECOND WHERE id=1; SELECT DATE_FORMAT(next_allowed_at,'%Y-%m-%dT%H:%i:%s.%fZ') AS resume_at,$1 AS message FROM security_discord_rate_limit WHERE id=1;",
+        "options": {
+          "queryBatching": "transaction",
+          "queryReplacement": "={{ [$json.message || 'NEXUS 보안 알림'] }}"
+        }
+      },
+      "id": "53cf62e1-7294-5820-9692-d3975574c486",
+      "name": "Discord 발송 슬롯 예약(알림)",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        2928,
+        208
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "2f8096cce6024737",
+          "name": "NEXUS Ticket DB local"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resume": "specificTime",
+        "dateTime": "={{ $json.resume_at }}"
+      },
+      "id": "3738e1d1-b6b5-5668-bf63-2ef4ca85bd8e",
+      "name": "Discord 슬롯 대기(알림)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3152,
+        208
+      ],
+      "webhookId": "2a0ec95c-6cf3-4b65-b255-914cbfada652"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT IGNORE INTO security_discord_rate_limit(id,next_allowed_at) VALUES (1,UTC_TIMESTAMP(6)); UPDATE security_discord_rate_limit SET next_allowed_at=GREATEST(next_allowed_at,UTC_TIMESTAMP(6))+INTERVAL 1 SECOND WHERE id=1; SELECT DATE_FORMAT(next_allowed_at,'%Y-%m-%dT%H:%i:%s.%fZ') AS resume_at,$1 AS message FROM security_discord_rate_limit WHERE id=1;",
+        "options": {
+          "queryBatching": "transaction",
+          "queryReplacement": "={{ [$json.message || 'NEXUS 보안 알림'] }}"
+        }
+      },
+      "id": "bb99dbae-37e4-5464-abb0-c5f927243aa8",
+      "name": "Discord 발송 슬롯 예약(대응 결과)",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        2928,
+        624
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "2f8096cce6024737",
+          "name": "NEXUS Ticket DB local"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resume": "specificTime",
+        "dateTime": "={{ $json.resume_at }}"
+      },
+      "id": "db2ffdad-5537-52e9-8a32-576308747a54",
+      "name": "Discord 슬롯 대기(대응 결과)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        3152,
+        624
+      ],
+      "webhookId": "594cdf09-0dcc-4d0e-b798-e0901aac753a"
+    },
+    {
+      "parameters": {
+        "jsCode": "const rules = new Set(['R5', 'R6', 'R8']);\nconst whitelist = new Set(['127.0.0.1', '192.168.3.10', '192.168.3.11', '192.168.3.14', '192.168.3.15']);\nconst ipv4 = /^(?:(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)\\.){3}(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)$/;\n\nreturn $input.all().filter(({ json }) => {\n  const ip = typeof json.src_ip === 'string' ? json.src_ip.trim() : '';\n  return json.ip_block_enabled === true && rules.has(json.rule_id) && ipv4.test(ip) && !whitelist.has(ip);\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        512
+      ],
+      "id": "0e321674-b28b-4296-9659-7e9dd00c320f",
+      "name": "R5/R6/R8 자동 차단 gate"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://192.168.3.10:5070/internal/api/v1/blocked-ips",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "ip",
+              "value": "={{ $json.src_ip }}"
+            },
+            {
+              "name": "reason",
+              "value": "={{ $json.rule_id }}_automated_soar"
+            },
+            {
+              "name": "minutes",
+              "value": "15"
+            },
+            {
+              "name": "created_by",
+              "value": "n8n_soar"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1184,
+        512
+      ],
+      "id": "1354bb74-b9b5-4745-8204-7ce37f1d04a9",
+      "name": "R5/R6/R8 IP 차단 API",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "PGt6bGOTju2v3NXk",
+          "name": "NEXUS SOAR Block API"
+        }
+      },
+      "disabled": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const d = $input.first().json || {};\nif (!d.contract_valid || d.fallback_reason || d.skip_side_effects || d.duplicate || d.ticket_duplicate) return [];\nconst ruleId = String(d.rule_id || d.rule?.id || '').trim();\nconst alertId = String(d.graylog_event_id || d.alert?.id || '').trim();\nconst timestamp = String(d.alert?.timestamp || d.last_seen || '').trim();\nconst ticketId = String(d.ticket_id || '').trim();\nconst event = d.event && typeof d.event === 'object' && !Array.isArray(d.event) ? d.event : null;\nif (!ruleId || !alertId || !timestamp || !ticketId || !event || !event.event_type) return [];\nconst severity = String(d.rule?.severity || event.severity || d.severity || '').trim();\nreturn [{ json: {\n  schema_version: '1.1', alert_id: alertId, rule_id: ruleId, timestamp, ticket_id: ticketId,\n  rule: { id: ruleId, severity }, alert: { id: alertId, timestamp }, event\n} }];"
+      },
+      "id": "2b7f75c1-f69a-4656-b3ae-85b98b0b1f1e",
+      "name": "AI-XDR 이벤트 계약 구성",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2672,
+        848
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://192.168.3.10:5070/internal/api/v1/ai-xdr/events",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 35000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        2912,
+        848
+      ],
+      "id": "96d9ad7e-ebbc-426c-a116-99caca8cb49e",
+      "name": "AI-XDR 이벤트 수집 API",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "PGt6bGOTju2v3NXk",
+          "name": "NEXUS SOAR Block API"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 3
+            }
+          ]
+        }
+      },
+      "id": "3f6b4bfc-d17e-490c-9bb9-ef3509a211cb",
+      "name": "AI-XDR 3분 집계 스케줄",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        2672,
+        1088
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://192.168.3.10:5070/internal/api/v1/ai-xdr/process",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "options": {
+          "timeout": 125000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        2912,
+        1088
+      ],
+      "id": "c4b965af-3539-4f68-aace-fea98a090e8a",
+      "name": "AI-XDR 윈도우 판정 API",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "PGt6bGOTju2v3NXk",
+          "name": "NEXUS SOAR Block API"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const root = $input.first()?.json || {};\nconst payload = root.body && typeof root.body === 'object' ? root.body : root;\nconst assessments = Array.isArray(payload.assessments) ? payload.assessments : [];\nconst out = [];\nconst approvalReasons = new Set(['DAYTIME_APPROVAL', 'WEEKEND_APPROVAL']);\nfor (const a of assessments) {\n  const rules = Array.isArray(a.rule_ids) ? a.rule_ids : [];\n  const actions = Array.isArray(a.recommended_actions) ? a.recommended_actions : [];\n  const score = a.threat_score;\n  const confidence = a.confidence;\n  const assessmentId = String(a.assessment_id || '').trim();\n  const eligible = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(assessmentId)\n    && a.status === 'PENDING' && a.approval_allowed === true && a.auto_allowed === false\n    && approvalReasons.has(a.policy_reason) && a.verdict === 'MALICIOUS'\n    && Number.isInteger(score) && score >= 80 && score <= 100\n    && Number.isFinite(confidence) && confidence >= 0 && confidence <= 1\n    && rules.length === 1 && rules[0] === 'R1';\n  if (!eligible) continue;\n  const ticketIds = Array.isArray(a.ticket_ids) ? [...new Set(a.ticket_ids.map(x => String(x || '').trim()))] : [];\n  for (const ticketId of ticketIds) {\n    const match = /^NX-DB-(\\d{6,18})$/.exec(ticketId);\n    if (!match) continue;\n    out.push({ json: {\n      assessment_id: assessmentId, status: a.status, assessment_status: a.status,\n      approval_allowed: a.approval_allowed, auto_allowed: a.auto_allowed, policy_reason: a.policy_reason,\n      verdict: a.verdict, threat_score: score, confidence, recommended_actions: actions,\n      rule_ids: rules, ticket_id: ticketId, ticket_db_id: Number(match[1])\n    } });\n  }\n}\nreturn out;"
+      },
+      "id": "a10ea9e3-049b-455b-acc4-b7d9909e65ad",
+      "name": "AI-XDR 승인 후보 펼치기",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3120,
+        1088
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT $1 AS assessment_id,$2 AS requested_ticket_id,$3 AS verdict,$4 AS threat_score,$5 AS confidence,CAST($6 AS JSON) AS recommended_actions,CAST($7 AS JSON) AS assessment_rule_ids,$8 AS assessment_status,CAST($9 AS UNSIGNED) AS approval_allowed,CAST($10 AS UNSIGNED) AS auto_allowed,$11 AS policy_reason,t.id AS ticket_db_id,t.ticket_key,t.status AS ticket_status,t.user_names AS ticket_db_users,t.rule_ids AS ticket_db_rules,t.latest_event AS ticket_db_latest FROM (SELECT 1) AS request LEFT JOIN security_incident_tickets t ON t.id=CAST($12 AS UNSIGNED)",
+        "options": {
+          "queryBatching": "single",
+          "queryReplacement": "={{ [$json.assessment_id, $json.ticket_id, $json.verdict, Number($json.threat_score), Number($json.confidence), JSON.stringify($json.recommended_actions), JSON.stringify($json.rule_ids), $json.assessment_status, $json.approval_allowed, $json.auto_allowed, $json.policy_reason, Number($json.ticket_db_id)] }}"
+        }
+      },
+      "id": "06b14a97-9f1e-487a-81d8-61e82b4f97b8",
+      "name": "AI-XDR 승인 대상 티켓 조회",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        3344,
+        1088
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "2f8096cce6024737",
+          "name": "NEXUS Ticket DB local"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const row = $input.first()?.json || {};\nconst parse = (v, fallback) => {\n  if (Array.isArray(v) || (v && typeof v === 'object')) return v;\n  if (typeof v === 'string') { try { return JSON.parse(v); } catch {} }\n  return fallback;\n};\nconst assessmentId = String(row.assessment_id || '').trim();\nconst assessmentStatus = String(row.assessment_status || '');\nconst asBoolean = value => value === true || value === 1 || value === '1' ? true\n  : value === false || value === 0 || value === '0' ? false : null;\nconst approvalAllowed = asBoolean(row.approval_allowed);\nconst autoAllowed = asBoolean(row.auto_allowed);\nconst policyReason = String(row.policy_reason || '');\nconst score = Number(row.threat_score);\nconst confidence = Number(row.confidence);\nconst actions = parse(row.recommended_actions, []);\nconst ticketId = String(row.requested_ticket_id || '').trim();\nconst dbId = Number(row.ticket_db_id || 0);\nconst ticketKey = String(row.ticket_key || '').trim();\nconst users = parse(row.ticket_db_users, []);\nconst ticketRules = parse(row.ticket_db_rules, []);\nconst assessmentRules = parse(row.assessment_rule_ids, []);\nconst latest = parse(row.ticket_db_latest, {});\nconst latestRule = String(latest.rule?.id || latest.rule_id || '').toUpperCase();\nconst latestType = String(latest.event?.event_type || latest.event_type || '');\nconst user = String(users.length === 1 ? users[0] : '').trim();\nconst expectedTicketId = dbId ? 'NX-DB-' + String(dbId).padStart(6, '0') : '';\nconst valid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(assessmentId)\n  && ticketId === expectedTicketId && !!ticketKey && row.ticket_status === 'open'\n  && assessmentStatus === 'PENDING' && approvalAllowed === true && autoAllowed === false\n  && ['DAYTIME_APPROVAL', 'WEEKEND_APPROVAL'].includes(policyReason)\n  && row.verdict === 'MALICIOUS' && Number.isInteger(score) && score >= 80 && score <= 100\n  && Number.isFinite(confidence) && confidence >= 0 && confidence <= 1\n  && assessmentRules.length === 1 && assessmentRules[0] === 'R1'\n  && ticketRules.includes('R1') && latestRule === 'R1'\n  && latestType === 'account_compromise_suspected'\n  && /^[A-Za-z][A-Za-z0-9._-]{0,49}$/.test(user);\nif (!valid) return [];\nconst planId = assessmentId + ':' + ticketId;\nconst sd = $getWorkflowStaticData('global');\nsd.pendingActions = sd.pendingActions && typeof sd.pendingActions === 'object' && !Array.isArray(sd.pendingActions)\n  ? sd.pendingActions : {};\nif (Object.prototype.hasOwnProperty.call(sd.pendingActions, planId))\n  return [{ json: { created: false, duplicate: true, plan_id: planId, assessment_id: assessmentId, ticket_id: ticketId } }];\nconst lockMinutes = 15;\nconst verifySql = \"SELECT 'lock' AS step_key, username, pinned, locked_until, (locked_until IS NOT NULL AND locked_until > NOW()) AS locked, session_version FROM users WHERE username = $1\";\nsd.pendingActions[planId] = {\n  plan_id: planId, assessment_id: assessmentId, ticket_id: ticketId,\n  ticket_db_id: dbId, ticket_key: ticketKey, rule_id: 'R1', user,\n  response_group: 'lock', step: '계정 잠금(AI-XDR 관제 승인)',\n  sql: 'UPDATE users SET locked_until = IF(pinned = 0, DATE_ADD(NOW(), INTERVAL $1 MINUTE), locked_until), session_version = IF(pinned = 1, session_version + 1, session_version) WHERE username = $2',\n  params: [lockMinutes, user], verify_sql: verifySql,\n  undo: 'UPDATE users SET locked_until = NULL WHERE username = ?',\n  assessment_status: assessmentStatus, approval_allowed: approvalAllowed, auto_allowed: autoAllowed,\n  policy_reason: policyReason, verdict: row.verdict, threat_score: score, confidence,\n  recommended_actions: actions, status: 'pending', saved_at: new Date().toISOString()\n};\nreturn [{ json: { created: true, pending_approval: true, plan_id: planId, assessment_id: assessmentId, ticket_id: ticketId, rule_id: 'R1' } }];"
+      },
+      "id": "80ea7fb3-ba50-464b-9468-7ea9c10bb2b0",
+      "name": "AI-XDR 승인 대기 계획 저장",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3568,
+        1088
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "db-ticket-action",
+              "leftValue": "={{ !!$json.db_ticket_action }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "707a0436-8edf-4ecc-9d1a-c7d85c7d0724",
+      "name": "승인 결과를 티켓 DB에 기록?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1552,
+        1168
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "xdr-approval-request",
+              "leftValue": "={{ !!$json.xdr_decision_request }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "d33e6f91-8d24-4d3f-988a-2197d8f1c001",
+      "name": "AI-XDR 승인 결정 요청?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1888,
+        1824
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://192.168.3.10:5070/internal/api/v1/ai-xdr/decision",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.xdr_decision_request) }}",
+        "options": {
+          "timeout": 35000
+        }
+      },
+      "id": "d33e6f91-8d24-4d3f-988a-2197d8f1c002",
+      "name": "AI-XDR 승인 결정 API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        2112,
+        1664
+      ],
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "PGt6bGOTju2v3NXk",
+          "name": "NEXUS SOAR Block API"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const api = $input.first()?.json || {};\nconst action = $('티켓 처리·화이트리스트').first()?.json || {};\nconst req = action.xdr_decision_request || {};\nif (api.ok !== true || api.status !== 'APPROVED' || api.approval_ref !== req.approval_ref) {\n  return [{json:{http:503,body:{status:'assessment_decision_failed'}}}];\n}\nif (action.ticket_response_exists === true) {\n  const sd = $getWorkflowStaticData('global');\n  const plan = sd.pendingActions && sd.pendingActions[action.pending_plan_id];\n  if (plan && plan.assessment_id === req.assessment_id && plan.ticket_id === action.ticket_id)\n    delete sd.pendingActions[action.pending_plan_id];\n  return [{json:{http:200,body:{status:'ok',assessment_id:req.assessment_id,ticket_id:action.ticket_id,pending_approval:false}}}];\n}\nreturn [{json:{...action,assessment_decision:api}}];"
+      },
+      "id": "d33e6f91-8d24-4d3f-988a-2197d8f1c003",
+      "name": "AI-XDR 승인 결정 결과",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2320,
+        1664
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const root = $input.first()?.json || {};\nconst payload = root.body && typeof root.body === 'object' ? root.body : root;\nconst assessments = Array.isArray(payload.assessments) ? payload.assessments : [];\nconst out = [];\nconst uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;\nfunction asArray(value) {\n  if (Array.isArray(value)) return value;\n  if (typeof value === 'string') { try { const parsed = JSON.parse(value); return Array.isArray(parsed) ? parsed : []; } catch {} }\n  return [];\n}\nfor (const assessment of assessments) {\n  const assessmentId = String(assessment.assessment_id || '').trim();\n  if (!uuidPattern.test(assessmentId)) continue;\n  const ticketIds = [...new Set(asArray(assessment.ticket_ids).map(v => String(v || '').trim()))];\n  for (const ticketId of ticketIds) {\n    if (!/^NX-DB-\\d{6,18}$/.test(ticketId)) continue;\n    out.push({ json: {\n      assessment_id: assessmentId,\n      ticket_id: ticketId,\n      rule_ids: asArray(assessment.rule_ids),\n      verdict: String(assessment.verdict || ''),\n      threat_score: assessment.threat_score,\n      confidence: assessment.confidence,\n      recommended_actions: asArray(assessment.recommended_actions),\n      policy_reason: String(assessment.policy_reason || ''),\n      status: String(assessment.status || ''),\n      approval_allowed: assessment.approval_allowed === true,\n      auto_allowed: assessment.auto_allowed === true\n    } });\n  }\n}\nreturn out;"
+      },
+      "id": "631731a3-5512-4ef7-ba18-5464f31a3ab6",
+      "name": "AI-XDR 평가 Ticket별 펼치기",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3600,
+        1896
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT a.assessment_id, a.ticket_id, a.rule_ids, a.verdict, a.threat_score, a.confidence,\n       a.recommended_actions, a.policy_reason, a.assessment_status, a.approval_allowed, a.auto_allowed,\n       t.ticket_key, t.src_ip AS ticket_src_ip, t.rule_ids AS ticket_rule_ids,\n       t.first_seen AS ticket_first_seen, t.last_seen AS ticket_last_seen,\n       t.latest_event AS ticket_latest_event\nFROM (\n  SELECT $1 AS assessment_id, $2 AS ticket_id, CAST($3 AS JSON) AS rule_ids,\n         $4 AS verdict, CAST($5 AS UNSIGNED) AS threat_score, CAST($6 AS DECIMAL(5,4)) AS confidence,\n         CAST($7 AS JSON) AS recommended_actions, $8 AS policy_reason, $9 AS assessment_status,\n         CAST($10 AS UNSIGNED) AS approval_allowed, CAST($11 AS UNSIGNED) AS auto_allowed\n) AS a\nLEFT JOIN security_incident_tickets t ON t.ticket_key = a.ticket_id\nLIMIT 1",
+        "options": {
+          "queryBatching": "single",
+          "queryReplacement": "={{ [$json.assessment_id, $json.ticket_id, JSON.stringify($json.rule_ids), $json.verdict, Number($json.threat_score), Number($json.confidence), JSON.stringify($json.recommended_actions), $json.policy_reason, $json.status, $json.approval_allowed === true ? 1 : 0, $json.auto_allowed === true ? 1 : 0] }}"
+        }
+      },
+      "id": "b84250e1-f167-4dc4-82e4-1aa93b2fd4c1",
+      "name": "AI-XDR 평가 Ticket 조회",
+      "type": "n8n-nodes-base.mySql",
+      "typeVersion": 2.5,
+      "position": [
+        3824,
+        1896
+      ],
+      "credentials": {
+        "mySql": {
+          "id": "2f8096cce6024737",
+          "name": "NEXUS Ticket DB local"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "function parseJson(value, fallback) {\n  if (value && typeof value === 'object') return value;\n  if (typeof value === 'string') { try { return JSON.parse(value); } catch {} }\n  return fallback;\n}\nfunction asArray(value) {\n  const parsed = parseJson(value, []);\n  return Array.isArray(parsed) ? parsed : [];\n}\nfunction showTime(raw) {\n  const value = String(raw || '').trim();\n  if (!value) return '';\n  if (!/(Z|[+-]\\d{2}:?\\d{2})$/i.test(value)) return value;\n  const date = new Date(value);\n  if (Number.isNaN(date.getTime())) return value;\n  return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(date) + ' KST';\n}\nconst row = $input.first()?.json || {};\nconst latest = parseJson(row.ticket_latest_event, {});\nconst event = latest.event && typeof latest.event === 'object' ? latest.event : latest;\nconst ticketId = String(row.ticket_key || '').trim();\nconst ticketRules = asArray(row.ticket_rule_ids);\nconst rules = asArray(row.rule_ids).length ? asArray(row.rule_ids) : ticketRules;\nconst srcIp = String(row.ticket_src_ip || event.src_ip || '').trim();\nconst eventType = String(event.event_type || '').trim();\nconst occurredAt = showTime(event.timestamp || event.occurred_at || latest.timestamp || row.ticket_last_seen || row.ticket_first_seen);\nconst verdictMap = { MALICIOUS: '악성', BENIGN: '정상', SUSPICIOUS: '의심', REVIEW_REQUIRED: '검토 필요' };\nconst statusMap = { PENDING: '승인 대기', APPROVED: '승인 완료', NO_ACTION: '조치 없음', AUTO_CANDIDATE: '자동 대응 후보' };\nconst policyMap = { DAYTIME_APPROVAL: '주간 승인 대기', WEEKEND_APPROVAL: '주말 승인 대기', DRY_RUN: '드라이런', AUTO_DISABLED: '자동 대응 비활성', LOW_SCORE: '점수 기준 미달', LOW_CONFIDENCE: '신뢰도 기준 미달', NO_ACTION: '조치 없음' };\nconst actionMap = { block_ip: 'IP 차단', lock_account: '계정 잠금', notify_only: '알림', review: '검토' };\nconst actions = asArray(row.recommended_actions);\nconst score = Number(row.threat_score);\nconst confidence = Number(row.confidence);\nconst assessmentId = String(row.assessment_id || '').trim();\nconst verdict = String(row.verdict || '').trim();\nconst status = String(row.assessment_status || '').trim();\nconst policyReason = String(row.policy_reason || '').trim();\nconst approval = row.approval_allowed === true || Number(row.approval_allowed) === 1;\nconst auto = row.auto_allowed === true || Number(row.auto_allowed) === 1;\nconst ready = !!ticketId && !!srcIp && !!eventType && !!occurredAt && !!assessmentId && rules.length > 0 &&\n  Number.isFinite(score) && Number.isFinite(confidence) && !!verdict && !!status;\nconst lines = [\n  '🛡 NEXUS AI-XDR 평가 결과',\n  `📌 Rule: ${rules.join(', ')}`,\n  `🎫 Ticket ID: ${ticketId || '미확인'}`,\n  `🌐 출발지 IP: ${srcIp || '미확인'}`,\n  `🧩 이벤트: ${eventType || '미확인'}`,\n  `🧠 판정: ${verdictMap[verdict] || verdict || '미확인'}${verdict ? ` (${verdict})` : ''}`,\n  `🔥 위협 점수: ${Number.isFinite(score) ? `${score}/100` : '미확인'}`,\n  `🎯 신뢰도: ${Number.isFinite(confidence) ? `${(confidence * 100).toFixed(0)}%` : '미확인'}`,\n  `🛠 권고 조치: ${actions.length ? actions.map(a => `${actionMap[a] || a} (${a})`).join(', ') : '없음'}`,\n  `🆔 Assessment ID: ${assessmentId || '미확인'}`,\n  `📋 정책: ${policyMap[policyReason] || policyReason || '미기록'}${policyReason && policyMap[policyReason] ? ` (${policyReason})` : ''}`,\n  `⏳ 상태: ${statusMap[status] || status || '미확인'}${status ? ` (${status})` : ''}`,\n  `✅ 승인 허용: ${approval ? '예' : '아니오'} · 자동 대응 허용: ${auto ? '예' : '아니오'}`,\n  `🕒 발생 시각: ${occurredAt || '미확인'}`\n];\nconst sd = $getWorkflowStaticData('global');\nreturn [{ json: { ...row, message: lines.join('\\n'), message_ready: ready,\n  xdr_discord_enabled: sd.xdr_discord_enabled === true } }];"
+      },
+      "id": "df4376ec-2f83-4f35-90f1-14361eb915c4",
+      "name": "AI-XDR 평가 Discord 메시지 구성",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4048,
+        1896
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "241574c8-b7f2-45ed-a4da-607f68e824f0",
+              "leftValue": "={{ $json.message_ready === true && $json.xdr_discord_enabled === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "958d2312-e548-451b-bb76-725c21d8c54e",
+      "name": "AI-XDR 평가 Discord 활성?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        4272,
+        1896
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "webhook",
+        "content": "={{ $json.message }}",
+        "options": {}
+      },
+      "id": "f5e3ff38-ccf3-4df9-a842-8aa780f4eda6",
+      "name": "AI-XDR 평가 Discord 알림",
+      "type": "n8n-nodes-base.discord",
+      "typeVersion": 2,
+      "position": [
+        4496,
+        1800
+      ],
+      "webhookId": "898fc63f-cfaf-4684-b30e-1055899fa231",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "discordWebhookApi": {
+          "id": "6CL2cQrlmyd7kHx2",
+          "name": "Discord Webhook account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "정규화·대응 계획",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "schema_version·필수 식별자 검증": {
+      "main": [
+        [
+          {
+            "node": "중복·비지원 이벤트 차단",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "payload 계약 오류",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "정규화·대응 계획": {
+      "main": [
+        [
+          {
+            "node": "NEXUS 안전 설정(수신)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "중복·비지원 이벤트 차단": {
+      "main": [
+        [
+          {
+            "node": "응답(중복·fallback·화이트리스트)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "티켓 기록(출발지별)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "R5/R6/R8 자동 차단 gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "티켓 기록(출발지별)": {
+      "main": [
+        [
+          {
+            "node": "화이트리스트 제외?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Discord 설정됨?": {
+      "main": [
+        [
+          {
+            "node": "Discord 발송 슬롯 예약(알림)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Discord 건너뜀(미설정·관찰·시험)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Discord 알림": {
+      "main": [
+        []
+      ]
+    },
+    "Discord 건너뜀(미설정·관찰·시험)": {
+      "main": [
+        []
+      ]
+    },
+    "payload 계약 오류": {
+      "main": [
+        [
+          {
+            "node": "응답 422(계약 오류)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "응답 422(계약 오류)": {
+      "main": [
+        []
+      ]
+    },
+    "규칙별 대응": {
+      "main": [
+        [
+          {
+            "node": "대응 준비(DB 조치)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "대응 자리: 알림·티켓만(R2,R5~R10)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "대응 준비(DB 조치)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "대응 자리: 내부 API 토큰 폐기(R4)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "대응 자리: 알림·티켓만(R2,R5~R10)": {
+      "main": [
+        []
+      ]
+    },
+    "대응 자리: 내부 API 토큰 폐기(R4)": {
+      "main": [
+        []
+      ]
+    },
+    "상황판 조회(GET)": {
+      "main": [
+        [
+          {
+            "node": "NEXUS 안전 설정(조회)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "티켓 목록 만들기": {
+      "main": [
+        [
+          {
+            "node": "응답(티켓 목록)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "응답(티켓 목록)": {
+      "main": [
+        []
+      ]
+    },
+    "티켓 처리 요청(POST)": {
+      "main": [
+        [
+          {
+            "node": "NEXUS 안전 설정(티켓 처리)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "티켓 처리·화이트리스트": {
+      "main": [
+        [
+          {
+            "node": "AI-XDR 승인 결정 요청?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "응답(처리 결과)": {
+      "main": [
+        []
+      ]
+    },
+    "대응 준비(DB 조치)": {
+      "main": [
+        [
+          {
+            "node": "DB 조치 실행?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB 조치 실행?": {
+      "main": [
+        [
+          {
+            "node": "DB 조치 실행",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "대응 결과 기록",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB 조치 실행": {
+      "main": [
+        [
+          {
+            "node": "조치 확인 조회",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "조치 확인 조회": {
+      "main": [
+        [
+          {
+            "node": "대응 결과 기록",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "대응 결과 기록": {
+      "main": [
+        [
+          {
+            "node": "결과를 Discord로?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "결과를 Discord로?": {
+      "main": [
+        [
+          {
+            "node": "Discord 발송 슬롯 예약(대응 결과)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "대응 결과 알림": {
+      "main": [
+        []
+      ]
+    },
+    "계정 조치 실행?": {
+      "main": [
+        [
+          {
+            "node": "계정 조치 실행",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "응답(처리 결과)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "계정 조치 실행": {
+      "main": [
+        [
+          {
+            "node": "계정 조치 확인",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "계정 조치 확인": {
+      "main": [
+        [
+          {
+            "node": "계정 조치 결과·응답",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "계정 조치 결과·응답": {
+      "main": [
+        [
+          {
+            "node": "승인 결과를 티켓 DB에 기록?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NEXUS 안전 설정(수신)": {
+      "main": [
+        [
+          {
+            "node": "schema_version·필수 식별자 검증",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NEXUS 안전 설정(조회)": {
+      "main": [
+        [
+          {
+            "node": "상황판 티켓 DB 조회",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NEXUS 안전 설정(티켓 처리)": {
+      "main": [
+        [
+          {
+            "node": "DB 티켓 대상 조회",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "응답 200(티켓 기록 후 접수)": {
+      "main": [
+        [
+          {
+            "node": "Discord 설정됨?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "규칙별 대응",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "화이트리스트 제외?": {
+      "main": [
+        [
+          {
+            "node": "응답(중복·fallback·화이트리스트)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "티켓 DB 원자 기록",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "티켓 DB 원자 기록": {
+      "main": [
+        [
+          {
+            "node": "티켓 DB 결과 병합",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "티켓 DB 결과 병합": {
+      "main": [
+        [
+          {
+            "node": "티켓 DB 중복인가?",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "AI-XDR 이벤트 계약 구성",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "티켓 DB 중복인가?": {
+      "main": [
+        [
+          {
+            "node": "응답(중복·fallback·화이트리스트)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "응답 200(티켓 기록 후 접수)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "상황판 티켓 DB 조회": {
+      "main": [
+        [
+          {
+            "node": "티켓 목록 만들기",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB 티켓 대상 조회": {
+      "main": [
+        [
+          {
+            "node": "티켓 처리·화이트리스트",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB 티켓 처리인가?": {
+      "main": [
+        [
+          {
+            "node": "DB 티켓 상태 반영",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "계정 조치 실행?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB 티켓 상태 반영": {
+      "main": [
+        [
+          {
+            "node": "DB 티켓 처리 결과",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB 티켓 처리 결과": {
+      "main": [
+        [
+          {
+            "node": "응답(처리 결과)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Discord 발송 슬롯 예약(알림)": {
+      "main": [
+        [
+          {
+            "node": "Discord 슬롯 대기(알림)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Discord 슬롯 대기(알림)": {
+      "main": [
+        [
+          {
+            "node": "Discord 알림",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Discord 발송 슬롯 예약(대응 결과)": {
+      "main": [
+        [
+          {
+            "node": "Discord 슬롯 대기(대응 결과)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Discord 슬롯 대기(대응 결과)": {
+      "main": [
+        [
+          {
+            "node": "대응 결과 알림",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "R5/R6/R8 자동 차단 gate": {
+      "main": [
+        [
+          {
+            "node": "R5/R6/R8 IP 차단 API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI-XDR 이벤트 계약 구성": {
+      "main": [
+        [
+          {
+            "node": "AI-XDR 이벤트 수집 API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI-XDR 3분 집계 스케줄": {
+      "main": [
+        [
+          {
+            "node": "AI-XDR 윈도우 판정 API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI-XDR 윈도우 판정 API": {
+      "main": [
+        [
+          {
+            "node": "AI-XDR 승인 후보 펼치기",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "AI-XDR 평가 Ticket별 펼치기",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI-XDR 승인 후보 펼치기": {
+      "main": [
+        [
+          {
+            "node": "AI-XDR 승인 대상 티켓 조회",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI-XDR 승인 대상 티켓 조회": {
+      "main": [
+        [
+          {
+            "node": "AI-XDR 승인 대기 계획 저장",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "승인 결과를 티켓 DB에 기록?": {
+      "main": [
+        [
+          {
+            "node": "DB 티켓 상태 반영",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "응답(처리 결과)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI-XDR 승인 결정 요청?": {
+      "main": [
+        [
+          {
+            "node": "AI-XDR 승인 결정 API",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "DB 티켓 처리인가?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI-XDR 승인 결정 API": {
+      "main": [
+        [
+          {
+            "node": "AI-XDR 승인 결정 결과",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI-XDR 승인 결정 결과": {
+      "main": [
+        [
+          {
+            "node": "DB 티켓 처리인가?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI-XDR 평가 Ticket별 펼치기": {
+      "main": [
+        [
+          {
+            "node": "AI-XDR 평가 Ticket 조회",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI-XDR 평가 Ticket 조회": {
+      "main": [
+        [
+          {
+            "node": "AI-XDR 평가 Discord 메시지 구성",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI-XDR 평가 Discord 메시지 구성": {
+      "main": [
+        [
+          {
+            "node": "AI-XDR 평가 Discord 활성?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI-XDR 평가 Discord 활성?": {
+      "main": [
+        [
+          {
+            "node": "AI-XDR 평가 Discord 알림",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "0e43f55b-541f-4b40-a479-b18b69d27755",
+  "meta": {
+    "instanceId": "61ff57a5cfa4553fe983720a8a994d0a2924e0497f084d8c59f3db0960478524"
+  },
+  "nodeGroups": [],
+  "id": "NXv3AiXdr27Qp6Lm",
+  "tags": []
+}

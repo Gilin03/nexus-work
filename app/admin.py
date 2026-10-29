@@ -667,10 +667,15 @@ def xdr_assessments():
 @permission_required("security.dashboard")
 def decide_xdr_assessment(assessment_id):
     from . import ai_xdr
+    decision = request.form.get("decision", "")
+    approved_action = None
+    if decision == "APPROVED_BLOCK_IP":
+        decision = "APPROVED"
+        approved_action = "block_ip"
     try:
         result = ai_xdr.decide_assessment(
-            assessment_id, request.form.get("decision", ""), int(g.user["id"]),
-            g.user.get("username", "admin"),
+            assessment_id, decision, int(g.user["id"]), g.user.get("username", "admin"),
+            approved_action=approved_action,
         )
     except ValueError:
         abort(400)

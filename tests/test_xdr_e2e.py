@@ -13,7 +13,7 @@ import pytest
 
 TOKEN = "nxapi_GPTw5VbeL6x5glQUl8mg7ML-yxmKWpwi"
 ATTACKER_IP = "203.0.113.88"
-WHITELIST_IPS = ["127.0.0.1", "192.168.3.10", "192.168.3.11", "192.168.3.14", "192.168.3.15"]
+WHITELIST_IPS = ["127.0.0.1", "192.168.3.10", "192.168.3.14", "192.168.3.15"]
 
 
 @pytest.fixture()

@@ -69,6 +69,7 @@ class Config:
         self.XDR_ENABLED = os.environ.get("XDR_ENABLED", "1") == "1"
         self.XDR_AUTO_ENABLED = os.environ.get("XDR_AUTO_ENABLED", "0") == "1"
         self.XDR_RESPONSE_MODE = os.environ.get("XDR_RESPONSE_MODE", "dry-run").strip().lower()
+        self.XDR_IP_BLOCK_ENABLED = os.environ.get("XDR_IP_BLOCK_ENABLED", "0") == "1"
         self.XDR_AI_PROVIDER = os.environ.get("XDR_AI_PROVIDER", "auto").strip().lower()
         self.XDR_AI_TIMEOUT = self._int_setting("XDR_AI_TIMEOUT", 30)
         self.XDR_TRIAGE_WINDOW_SECONDS = self._int_setting("XDR_TRIAGE_WINDOW_SECONDS", 180)

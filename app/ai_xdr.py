@@ -441,6 +441,33 @@ def _policy_threshold_error(assessment, config):
     return ""
 
 
+def _block_approval_error(assessment, config):
+    """차단 승인 전 assessment와 대상 IP가 현재 정책을 만족하는지 fail-closed로 확인한다."""
+    if assessment.get("status") != "PENDING":
+        return "assessment_not_pending"
+    if assessment.get("approval_allowed") not in (True, 1, "1"):
+        return "approval_not_allowed"
+    if assessment.get("verdict") != "MALICIOUS":
+        return "verdict_not_malicious"
+    threshold_error = _policy_threshold_error(assessment, config)
+    if threshold_error:
+        return threshold_error
+    actions = _json_value(assessment.get("recommended_actions"), [])
+    if not isinstance(actions, list) or "block_ip" not in actions:
+        return "action_not_recommended"
+    raw_ip = str(assessment.get("src_ip") or "").strip()
+    try:
+        ip = ipaddress.ip_address(raw_ip)
+    except ValueError:
+        return "invalid_or_missing_ip"
+    if security.is_protected_block_ip(ip.compressed):
+        return "protected_ip"
+    if str(config.get("XDR_RESPONSE_MODE", "dry-run")).lower() == "live" and \
+            config.get("XDR_IP_BLOCK_ENABLED", False) not in (True, 1, "1"):
+        return "ip_block_gate_closed"
+    return ""
+
+
 def _r1_approval_error(assessment, config):
     if assessment.get("verdict") != "MALICIOUS":
         return "verdict_not_malicious"
@@ -640,7 +667,7 @@ def list_assessments(limit=50):
         "SELECT assessment_id, incident_ticket_id, JSON_EXTRACT(event_summary, '$.ticket_ids') AS ticket_ids, "
         "src_ip, user_names, rule_ids, event_types, event_count, "
         "first_seen, last_seen, threat_score, confidence, verdict, reasoning, recommended_actions, policy_mode, "
-        "policy_reason, status, response_result, created_at, decided_by, decided_at "
+        "policy_reason, approval_allowed, status, response_result, created_at, decided_by, decided_at "
         "FROM security_xdr_assessments ORDER BY created_at DESC LIMIT %s",
         (max(1, min(int(limit), 100)),),
     )
@@ -650,19 +677,23 @@ def list_assessments(limit=50):
             row[key] = _json_value(row.get(key), fallback)
         if not isinstance(row["ticket_ids"], list):
             row["ticket_ids"] = []
+        row["block_approval_error"] = _block_approval_error(row, current_app.config)
         for key in ("first_seen", "last_seen"):
             if row.get(key) is not None:
                 row[key + "_kst"] = _parse_datetime(row[key], assume_utc=True).astimezone(KST).strftime("%Y-%m-%d %H:%M:%S KST")
     return rows
 
 
-def decide_assessment(assessment_id, status, actor_id, actor_name, now=None, approval_ref=None):
+def decide_assessment(assessment_id, status, actor_id, actor_name, now=None, approval_ref=None, approved_action=None):
     if status not in {"APPROVED", "REJECTED", "FALSE_POSITIVE"}:
         raise ValueError("invalid_decision")
+    if approved_action not in (None, "block_ip") or (approved_action and status != "APPROVED"):
+        raise ValueError("invalid_approved_action")
     now = _parse_datetime(now or datetime.now(UTC))
     row = db.query_one(
         "SELECT assessment_id, incident_ticket_id, src_ip, rule_ids, user_names, event_count, last_seen, verdict, "
-        "threat_score, confidence, reasoning, recommended_actions, event_summary, status, response_result "
+        "threat_score, confidence, reasoning, recommended_actions, event_summary, status, response_result, "
+        "approval_allowed "
         "FROM security_xdr_assessments WHERE assessment_id = %s FOR UPDATE",
         (assessment_id,),
     )
@@ -678,21 +709,34 @@ def decide_assessment(assessment_id, status, actor_id, actor_name, now=None, app
     actions = _json_value(row.get("recommended_actions"), [])
     summary = _json_value(row.get("event_summary"), {})
     result = {"blocked": False, "reason": "no_block_action"}
-    if status == "APPROVED" and "block_ip" in actions:
+    if status == "APPROVED" and "block_ip" in actions and approved_action is None and \
+            str(current_app.config.get("XDR_RESPONSE_MODE", "dry-run")).lower() != "live":
+        # Preserve the existing dry-run response for generic/n8n approvals, but never register an IP here.
+        result = {"blocked": False, "reason": "dry_run"}
+    if status == "APPROVED" and approved_action == "block_ip":
         config = current_app.config
+        error = _block_approval_error({**row, "recommended_actions": actions}, config)
+        if error:
+            raise RuntimeError(error)
         if str(config.get("XDR_RESPONSE_MODE", "dry-run")).lower() != "live":
-            result = {"blocked": False, "reason": "dry_run"}
+            result = {"blocked": False, "action": "block_ip", "reason": "dry_run", "minutes": 15}
         else:
-            error = _block_candidate_error({"recommended_actions": actions}, summary, config, now)
-            if error:
-                result = {"blocked": False, "reason": error}
-            else:
-                from .internal_api import AUTO_BLOCK_REASONS
-                rule_id = summary["rule_ids"][0]
-                blocked = security.block_ip(summary["src_ip"], reason=f"ai_xdr_approved_{rule_id}_{AUTO_BLOCK_REASONS[rule_id]}",
-                                            minutes=15, created_by=f"xdr_approval:{actor_id}")
-                result = {"blocked": bool(blocked), "rule_id": rule_id, "minutes": 15,
-                          "reason": "block_succeeded" if blocked else "block_failed"}
+            if current_app.config.get("XDR_IP_BLOCK_ENABLED", False) not in (True, 1, "1"):
+                raise RuntimeError("ip_block_gate_closed")
+            ip = ipaddress.ip_address(str(row["src_ip"]).strip()).compressed
+            rule_ids = _json_value(row.get("rule_ids"), [])
+            ticket_ids = summary.get("ticket_ids") if isinstance(summary, dict) else []
+            if not isinstance(rule_ids, list):
+                rule_ids = []
+            if not isinstance(ticket_ids, list) or not ticket_ids:
+                ticket_ids = ["no-ticket"]
+            ticket_id = str((ticket_ids or ["no-ticket"])[0])[:24]
+            reason = f"xdr_approved:{str(assessment_id)[:36]}:{ticket_id}:{','.join(rule_ids)[:12]}"[:100]
+            blocked = security.block_ip(ip, reason=reason, minutes=15, created_by="ai_xdr_admin")
+            if not blocked:
+                raise RuntimeError("block_registration_failed")
+            result = {"blocked": True, "action": "block_ip", "ip": ip, "minutes": 15,
+                      "reason": "block_succeeded", "block_reason": reason}
     if approval_ref:
         result["approval_ref"] = approval_ref
     updated = db.execute_rowcount(

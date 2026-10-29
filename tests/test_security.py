@@ -104,7 +104,7 @@ def test_ip_rate_limit():
     assert security.ip_rate_limited("5.6.7.8", 3) is False  # 다른 IP는 별개
 
 
-@pytest.mark.parametrize("ip", ["127.0.0.1", "::1", "192.168.3.10", "192.168.3.11", "192.168.3.14", "192.168.3.15", "::ffff:192.168.3.10"])
+@pytest.mark.parametrize("ip", ["127.0.0.1", "::1", "192.168.3.10", "192.168.3.14", "192.168.3.15", "::ffff:192.168.3.10"])
 def test_protected_ips_cannot_be_blocked_or_checked(monkeypatch, ip):
     from app import db
 
@@ -115,6 +115,10 @@ def test_protected_ips_cannot_be_blocked_or_checked(monkeypatch, ip):
     assert security.block_ip(ip) is False
     assert security.is_ip_blocked(ip) == (False, "")
     assert calls == []
+
+
+def test_192_168_3_11_is_not_a_protected_block_ip():
+    assert security.is_protected_block_ip("192.168.3.11") is False
 
 
 # ---------- 의심 입력 기록(차단하지 않고 탐지용 신호만 남긴다) ----------

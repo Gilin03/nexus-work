@@ -805,6 +805,203 @@ def test_assessment_approval_in_dry_run_records_decision_without_blocking(app, m
     assert writes[0][1][0] == "APPROVED"
 
 
+def _block_approval_row(**overrides):
+    row = {
+        "assessment_id": "assessment-block-1", "incident_ticket_id": None,
+        "src_ip": "198.51.100.77", "rule_ids": '["R1"]', "user_names": '["testuser"]',
+        "event_count": 1, "last_seen": "2026-10-26T01:30:00+00:00",
+        "verdict": "MALICIOUS", "threat_score": 90, "confidence": 0.95,
+        "reasoning": "synthetic metadata", "recommended_actions": '["block_ip"]',
+        "event_summary": json.dumps({"rule_ids": ["R1"], "src_ip": "198.51.100.77",
+                                      "last_seen": "2026-10-26T01:30:00+00:00",
+                                      "ticket_ids": ["NX-DB-000046"]}),
+        "status": "PENDING", "approval_allowed": 1, "auto_allowed": 0,
+        "policy_reason": "DAYTIME_APPROVAL", "response_result": None,
+    }
+    row.update(overrides)
+    return row
+
+
+def test_explicit_block_approval_dry_run_records_without_registering_ip(app, monkeypatch):
+    from app import db, security
+
+    now = datetime(2026, 10, 26, 1, 30, tzinfo=timezone.utc)
+    row = _block_approval_row()
+    writes, blocks = [], []
+    monkeypatch.setattr(db, "query_one", lambda *_args, **_kwargs: row)
+    monkeypatch.setattr(db, "execute_rowcount", lambda sql, params=(): writes.append((sql, params)) or 1)
+    monkeypatch.setattr(security, "log_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(security, "block_ip", lambda *args, **kwargs: blocks.append((args, kwargs)) or True)
+    app.config.update({"XDR_RESPONSE_MODE": "dry-run", "XDR_IP_BLOCK_ENABLED": False,
+                       "XDR_AUTO_MIN_SCORE": 80, "XDR_AUTO_MIN_CONFIDENCE": 0.8})
+
+    with app.app_context():
+        result = ai_xdr.decide_assessment("assessment-block-1", "APPROVED", 7, "admin", now=now,
+                                          approved_action="block_ip")
+
+    assert result["status"] == "APPROVED"
+    assert result["response"]["reason"] == "dry_run"
+    assert blocks == []
+    assert len(writes) == 1
+
+
+def test_explicit_block_approval_live_uses_existing_block_ip_with_trace(app, monkeypatch):
+    from app import db, security
+
+    now = datetime(2026, 10, 26, 1, 30, tzinfo=timezone.utc)
+    row = _block_approval_row()
+    writes, blocks = [], []
+    monkeypatch.setattr(db, "query_one", lambda *_args, **_kwargs: row)
+    monkeypatch.setattr(db, "execute_rowcount", lambda sql, params=(): writes.append((sql, params)) or 1)
+    monkeypatch.setattr(security, "log_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(security, "block_ip", lambda *args, **kwargs: blocks.append((args, kwargs)) or True)
+    app.config.update({"XDR_RESPONSE_MODE": "live", "XDR_IP_BLOCK_ENABLED": True,
+                       "XDR_AUTO_MIN_SCORE": 80, "XDR_AUTO_MIN_CONFIDENCE": 0.8,
+                       "XDR_MAX_EVENT_AGE_SECONDS": 300})
+
+    with app.app_context():
+        result = ai_xdr.decide_assessment("assessment-block-1", "APPROVED", 7, "admin", now=now,
+                                          approved_action="block_ip")
+
+    assert result["status"] == "APPROVED"
+    assert result["response"]["reason"] == "block_succeeded"
+    assert blocks[0][0] == ("198.51.100.77",)
+    assert blocks[0][1]["minutes"] == 15
+    assert blocks[0][1]["created_by"] == "ai_xdr_admin"
+    assert "assessment-block-1" in blocks[0][1]["reason"]
+    assert "NX-DB-000046" in blocks[0][1]["reason"]
+    assert "R1" in blocks[0][1]["reason"]
+    assert len(writes) == 1
+
+
+def test_explicit_block_approval_allows_192_168_3_11_test_target(app, monkeypatch):
+    from app import db, security
+
+    row = _block_approval_row(
+        src_ip="192.168.3.11",
+        event_summary=json.dumps({"rule_ids": ["R1"], "src_ip": "192.168.3.11",
+                                  "last_seen": "2026-10-26T01:30:00+00:00",
+                                  "ticket_ids": ["NX-DB-000046"]}),
+    )
+    calls = []
+    monkeypatch.setattr(db, "query_one", lambda *_args, **_kwargs: row)
+    monkeypatch.setattr(db, "execute_rowcount", lambda *_args, **_kwargs: 1)
+    monkeypatch.setattr(security, "log_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(security, "block_ip", lambda *args, **kwargs: calls.append((args, kwargs)) or True)
+    app.config.update({"XDR_RESPONSE_MODE": "live", "XDR_IP_BLOCK_ENABLED": True,
+                       "XDR_AUTO_MIN_SCORE": 80, "XDR_AUTO_MIN_CONFIDENCE": 0.8,
+                       "XDR_MAX_EVENT_AGE_SECONDS": 300})
+
+    with app.app_context():
+        result = ai_xdr.decide_assessment("assessment-block-1", "APPROVED", 7, "admin",
+                                          approved_action="block_ip")
+
+    assert result["response"]["blocked"] is True
+    assert calls[0][0] == ("192.168.3.11",)
+    assert calls[0][1]["minutes"] == 15
+
+
+def test_block_approval_live_requires_both_live_gates(app, monkeypatch):
+    from app import db, security
+
+    row = _block_approval_row()
+    writes, blocks = [], []
+    monkeypatch.setattr(db, "query_one", lambda *_args, **_kwargs: row)
+    monkeypatch.setattr(db, "execute_rowcount", lambda sql, params=(): writes.append((sql, params)) or 1)
+    monkeypatch.setattr(security, "block_ip", lambda *args, **kwargs: blocks.append((args, kwargs)) or True)
+    app.config.update({"XDR_RESPONSE_MODE": "live", "XDR_IP_BLOCK_ENABLED": False,
+                       "XDR_AUTO_MIN_SCORE": 80, "XDR_AUTO_MIN_CONFIDENCE": 0.8})
+
+    with app.app_context(), pytest.raises(RuntimeError, match="ip_block_gate_closed"):
+        ai_xdr.decide_assessment("assessment-block-1", "APPROVED", 7, "admin",
+                                 approved_action="block_ip")
+
+    assert blocks == []
+    assert writes == []
+
+
+@pytest.mark.parametrize("overrides,expected", [
+    ({"approval_allowed": 0}, "approval_not_allowed"),
+    ({"verdict": "SUSPICIOUS"}, "verdict_not_malicious"),
+    ({"threat_score": 79}, "score_below_threshold"),
+    ({"confidence": 0.79}, "confidence_below_threshold"),
+    ({"recommended_actions": '["notify_only"]'}, "action_not_recommended"),
+    ({"src_ip": "invalid-ip"}, "invalid_or_missing_ip"),
+    ({"src_ip": "192.168.3.14"}, "protected_ip"),
+])
+def test_block_approval_rejects_ineligible_assessments(app, monkeypatch, overrides, expected):
+    from app import db, security
+
+    row = _block_approval_row(**overrides)
+    writes, blocks = [], []
+    monkeypatch.setattr(db, "query_one", lambda *_args, **_kwargs: row)
+    monkeypatch.setattr(db, "execute_rowcount", lambda sql, params=(): writes.append((sql, params)) or 1)
+    monkeypatch.setattr(security, "block_ip", lambda *args, **kwargs: blocks.append((args, kwargs)) or True)
+    app.config.update({"XDR_RESPONSE_MODE": "live", "XDR_IP_BLOCK_ENABLED": True,
+                       "XDR_AUTO_MIN_SCORE": 80, "XDR_AUTO_MIN_CONFIDENCE": 0.8})
+
+    with app.app_context(), pytest.raises(RuntimeError, match=expected):
+        ai_xdr.decide_assessment("assessment-block-1", "APPROVED", 7, "admin",
+                                 approved_action="block_ip")
+
+    assert blocks == []
+    assert writes == []
+
+
+def test_general_approval_never_registers_recommended_block_ip(app, monkeypatch):
+    from app import db, security
+
+    row = _block_approval_row()
+    writes, blocks = [], []
+    monkeypatch.setattr(db, "query_one", lambda *_args, **_kwargs: row)
+    monkeypatch.setattr(db, "execute_rowcount", lambda sql, params=(): writes.append((sql, params)) or 1)
+    monkeypatch.setattr(security, "log_event", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(security, "block_ip", lambda *args, **kwargs: blocks.append((args, kwargs)) or True)
+    app.config.update({"XDR_RESPONSE_MODE": "live", "XDR_IP_BLOCK_ENABLED": True,
+                       "XDR_AUTO_MIN_SCORE": 80, "XDR_AUTO_MIN_CONFIDENCE": 0.8})
+
+    with app.app_context():
+        result = ai_xdr.decide_assessment("assessment-block-1", "APPROVED", 7, "admin")
+
+    assert result["response"]["reason"] == "no_block_action"
+    assert blocks == []
+    assert len(writes) == 1
+
+
+def test_admin_xdr_template_shows_separate_block_approval_only_when_recommended(app):
+    from flask import render_template
+
+    def item(assessment_id, actions, error=""):
+        return {
+            "assessment_id": assessment_id, "last_seen_kst": "2026-10-29 10:00:00 KST",
+            "first_seen_kst": "2026-10-29 10:00:00 KST", "src_ip": "198.51.100.77",
+            "user_names": [], "rule_ids": ["R1"], "event_types": ["account_compromise_suspected"],
+            "event_count": 1, "verdict": "MALICIOUS", "threat_score": 90, "confidence": 0.95,
+            "reasoning": "synthetic", "status": "PENDING", "policy_mode": "day",
+            "policy_reason": "DAYTIME_APPROVAL", "response_result": {}, "ticket_ids": [],
+            "recommended_actions": actions, "decided_at": None, "block_approval_error": error,
+        }
+
+    with app.test_request_context("/admin/xdr"):
+        html = render_template("admin_xdr.html", assessments=[
+            item("eligible", ["block_ip"]),
+            item("protected", ["block_ip"], "protected_ip"),
+            item("notify-only", ["notify_only"]),
+        ], xdr_enabled=True, unavailable=False, result="")
+
+    assert html.count('value="APPROVED_BLOCK_IP"') == 2
+    assert 'value="APPROVED_BLOCK_IP" disabled title="protected_ip"' in html
+
+
+def test_ip_block_gate_configuration_is_opt_in(monkeypatch):
+    from app.config import Config
+
+    monkeypatch.delenv("XDR_IP_BLOCK_ENABLED", raising=False)
+    assert Config().XDR_IP_BLOCK_ENABLED is False
+    monkeypatch.setenv("XDR_IP_BLOCK_ENABLED", "1")
+    assert Config().XDR_IP_BLOCK_ENABLED is True
+
+
 def test_assessment_approval_dry_run_is_idempotent_for_same_approval_ref(app, monkeypatch):
     from app import db, security
 

@@ -31,8 +31,12 @@
             <form method="post" action="{{ url_for('admin.decide_xdr_assessment', assessment_id=a.assessment_id) }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button class="btn primary" name="decision" value="APPROVED">승인</button>
+              {% if 'block_ip' in a.recommended_actions %}
+                <button class="btn danger" name="decision" value="APPROVED_BLOCK_IP"{% if a.block_approval_error %} disabled title="{{ a.block_approval_error }}"{% endif %}>차단 승인</button>
+              {% endif %}
               <button class="btn" name="decision" value="REJECTED">거부</button>
               <button class="btn" name="decision" value="FALSE_POSITIVE">오탐</button>
+              {% if 'block_ip' in a.recommended_actions and a.block_approval_error %}<small class="hint">차단 승인 불가: {{ a.block_approval_error }}</small>{% endif %}
             </form>
           {% else %}{{ a.decided_at or '처리 완료' }}{% endif %}
           </td>

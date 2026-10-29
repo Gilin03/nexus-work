@@ -18,7 +18,7 @@ from flask import abort, current_app, g, jsonify, render_template, request, sess
 _logger = logging.getLogger("nexus.security")
 _logger.propagate = False
 
-PROTECTED_BLOCK_IPS = frozenset({"127.0.0.1", "192.168.3.10", "192.168.3.11", "192.168.3.14", "192.168.3.15", "::1"})
+PROTECTED_BLOCK_IPS = frozenset({"127.0.0.1", "192.168.3.10", "192.168.3.14", "192.168.3.15", "::1"})
 
 
 def is_protected_block_ip(ip: str) -> bool:
